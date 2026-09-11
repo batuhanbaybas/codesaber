@@ -1,0 +1,52 @@
+<h2>Default theme direction?</h2>
+<p class="subtitle">Both will ship as switchable themes eventually — this is the default identity.</p>
+
+<div class="cards">
+  <div class="card" data-choice="light" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:0">
+      <div style="background:#fdfbf7;border:1px solid #eee;border-radius:6px;overflow:hidden;font-size:9px;color:#555">
+        <div style="height:20px;background:rgba(245,243,240,.65);border-bottom:1px solid #e8e6e2;display:flex;align-items:center;padding:0 8px;color:#888">aide — myproject (main)</div>
+        <div style="display:flex;height:150px">
+          <div style="width:120px;background:#f7f5f1;border-right:1px solid #eae8e4;padding:8px;font-size:9px">▾ myproject<br>&nbsp;&nbsp;▾ internal<br>&nbsp;&nbsp;&nbsp;&nbsp;order.go</div>
+          <div style="flex:1;background:#ffffff;padding:10px;font-family:monospace;font-size:9px;line-height:1.8">
+            14&nbsp;<span style="color:#b35c00">func</span> <span style="color:#0057ae">(s *OrderService)</span> Create(<br>
+            15&nbsp;&nbsp;&nbsp;&nbsp;order Order,<br>
+            16&nbsp;<span style="color:#0057ae">) error {</span><br>
+            17&nbsp;&nbsp;&nbsp;&nbsp;err := s.repo.Save(order)<br>
+            18&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#b35c00">return</span> err
+          </div>
+          <div style="width:130px;background:#f7f5f1;border-left:1px solid #eae8e4;padding:8px;font-size:9px">AGENT<br><br>› refactor…<br><span style="color:#2da44e">✓ diff applied</span></div>
+        </div>
+        <div style="height:26px;background:#2e2c2a;color:#bbb;display:flex;align-items:center;padding:0 8px;font-family:monospace">⚡ go test ./...</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — "Milk" light (JetBrains-like)</h3>
+      <p>Warm-accent light theme like IntelliJ's New UI / Xcode light. SF Pro text, orange accent, vibrancy sidebar. Feels native on macOS in daylight.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="dark" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:0">
+      <div style="background:#1e1f22;border:1px solid #333;border-radius:6px;overflow:hidden;font-size:9px;color:#a0a0a0">
+        <div style="height:20px;background:#2b2d30;border-bottom:1px solid #3a3c3f;display:flex;align-items:center;padding:0 8px;color:#888">aide — myproject (main)</div>
+        <div style="display:flex;height:150px">
+          <div style="width:120px;background:#2b2d30;border-right:1px solid #3a3c3f;padding:8px;font-size:9px">▾ myproject<br>&nbsp;&nbsp;▾ internal<br>&nbsp;&nbsp;&nbsp;&nbsp;order.go</div>
+          <div style="flex:1;background:#1e1f22;padding:10px;font-family:monospace;font-size:9px;line-height:1.8">
+            14&nbsp;<span style="color:#cf8e6d">func</span> <span style="color:#6a8759">(s *OrderService)</span> Create(<br>
+            15&nbsp;&nbsp;&nbsp;&nbsp;order Order,<br>
+            16&nbsp;<span style="color:#6a8759">) error {</span><br>
+            17&nbsp;&nbsp;&nbsp;&nbsp;err := s.repo.Save(order)<br>
+            18&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#cf8e6d">return</span> err
+          </div>
+          <div style="width:130px;background:#2b2d30;border-left:1px solid #3a3c3f;padding:8px;font-size:9px">AGENT<br><br>› refactor…<br><span style="color:#5dbb63">✓ diff applied</span></div>
+        </div>
+        <div style="height:26px;background:#101010;color:#aaa;display:flex;align-items:center;padding:0 8px;font-family:monospace">⚡ go test ./...</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — Darcula-modern dark</h3>
+      <p>JagBrains Darcula-inspired but softened: warmer grays, less contrast stress, standard macOS dark surfaces. Less eye strain for long agent-driven sessions.</p>
+    </div>
+  </div>
+</div>
