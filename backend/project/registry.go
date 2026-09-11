@@ -1,0 +1,90 @@
+package project
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type Registry struct {
+	mu       sync.Mutex
+	projects map[string]*Project
+	notify   func()
+}
+
+func NewRegistry(notify func()) *Registry {
+	return &Registry{
+		projects: make(map[string]*Project),
+		notify:   notify,
+	}
+}
+
+func (r *Registry) Add(root string) (*Project, error) {
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return nil, fmt.Errorf("resolve path: %w", err)
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return nil, fmt.Errorf("stat %s: %w", abs, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("%s is not a directory", abs)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, p := range r.projects {
+		if p.Root == abs {
+			return nil, fmt.Errorf("project already open: %s", abs)
+		}
+	}
+	p := &Project{
+		ID:       uuid.NewString(),
+		Name:     filepath.Base(abs),
+		Root:     abs,
+		Branch:   Branch(abs),
+		LastUsed: time.Now(),
+		EngineOK: true,
+	}
+	r.projects[p.ID] = p
+	r.notify()
+	return p, nil
+}
+
+func (r *Registry) List() []Project {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]Project, 0, len(r.projects))
+	for _, p := range r.projects {
+		out = append(out, *p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].LastUsed.After(out[j].LastUsed) })
+	return out
+}
+
+func (r *Registry) Get(id string) (*Project, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p, ok := r.projects[id]
+	if !ok {
+		return nil, fmt.Errorf("project not found: %s", id)
+	}
+	return p, nil
+}
+
+func (r *Registry) Remove(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.projects[id]; !ok {
+		return fmt.Errorf("project not found: %s", id)
+	}
+	delete(r.projects, id)
+	r.notify()
+	return nil
+}
