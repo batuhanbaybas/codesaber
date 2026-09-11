@@ -11,6 +11,9 @@ import (
 	"github.com/google/uuid"
 )
 
+// Branch returns the git branch for root. Replaced by the git engine in Phase 2.
+var Branch = func(root string) string { return "(unknown)" }
+
 type Registry struct {
 	mu       sync.Mutex
 	projects map[string]*Project

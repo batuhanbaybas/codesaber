@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-var Branch = func(root string) string { return "(unknown)" }
-
 func TestRegistryAddListRemove(t *testing.T) {
 	dir := t.TempDir()
 	reg := NewRegistry(func() {})
