@@ -40,7 +40,30 @@ func TestSaveIsAtomicViaTempRename(t *testing.T) {
 
 func TestDirtyUnknownFile(t *testing.T) {
 	svc := New()
-	if svc.Dirty(filepath.Join(t.TempDir(), "nope.go"), "") {
+	path := filepath.Join(t.TempDir(), "nope.go")
+	if svc.Dirty(path, "") {
 		t.Fatal("unknown file with empty current must not be dirty")
+	}
+	if svc.Dirty(path, "some content") {
+		t.Fatal("untracked file must never be dirty, even with non-empty current")
+	}
+}
+
+func TestSaveErrorCleansTempFile(t *testing.T) {
+	dir := t.TempDir()
+	// renaming a file onto an existing directory fails, exercising the rename
+	// error path
+	target := filepath.Join(dir, "subdir")
+	os.Mkdir(target, 0o755)
+
+	svc := New()
+	if err := svc.Save(target, "new"); err == nil {
+		t.Fatal("Save against a directory should fail")
+	}
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if e.Name()[0] == '.' {
+			t.Fatalf("temp file %s left behind on error path", e.Name())
+		}
 	}
 }

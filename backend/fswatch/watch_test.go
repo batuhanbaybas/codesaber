@@ -33,3 +33,39 @@ func TestWatcherReportsWrites(t *testing.T) {
 		t.Fatal("no fs event within 2s")
 	}
 }
+
+func TestCloseWithoutReaderExitsForwarder(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "spam.txt")
+	os.WriteFile(file, []byte("0"), 0o644)
+
+	w, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_ = w.Events() // subscribe, never read
+	for i := 0; i < 200; i++ {
+		b, _ := os.ReadFile(file)
+		os.WriteFile(file, append(b, []byte("data\n")...), 0o644)
+	}
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	select {
+	case <-w.internalDone():
+	case <-time.After(2 * time.Second):
+		t.Fatal("forwarder did not exit after Close")
+	}
+	// a reader drains buffered events, then gets the closed sentinel
+	for {
+		select {
+		case _, ok := <-w.Events():
+			if !ok {
+				return
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("events channel not closed within 2s of Close")
+		}
+	}
+}

@@ -20,8 +20,14 @@ type Store struct{ path string }
 func NewStore(path string) *Store { return &Store{path: path} }
 
 func DefaultStorePath() string {
-	base, _ := os.UserConfigDir()
-	return filepath.Join(base, "aide", "recents.json")
+	if base, err := os.UserConfigDir(); err == nil {
+		return filepath.Join(base, "aide", "recents.json")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(os.TempDir(), "aide", "recents.json")
+	}
+	return filepath.Join(home, ".config", "aide", "recents.json")
 }
 
 func (s *Store) load() []Recent {
@@ -50,8 +56,13 @@ func (s *Store) save(recents []Recent) {
 
 func (s *Store) Remember(id, root, branch string) {
 	recents := s.load()
-	for _, r := range recents {
+	for i, r := range recents {
 		if r.Root == root {
+			recents[i].ID = id
+			recents[i].Branch = branch
+			recents[i].LastUsed = time.Now()
+			sort.Slice(recents, func(x, y int) bool { return recents[x].LastUsed.After(recents[y].LastUsed) })
+			s.save(recents)
 			return
 		}
 	}
@@ -65,11 +76,12 @@ func (s *Store) Remember(id, root, branch string) {
 	s.save(recents)
 }
 
-func (s *Store) Forget(id string) {
+// Forget drops the entry identified by root.
+func (s *Store) Forget(root string) {
 	recents := s.load()
 	out := recents[:0]
 	for _, r := range recents {
-		if r.ID != id {
+		if r.Root != root {
 			out = append(out, r)
 		}
 	}

@@ -3,6 +3,7 @@ package fswatch
 import (
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -12,7 +13,14 @@ type Event struct {
 	Op   string `json:"op"` // create|write|remove|rename
 }
 
-type Watcher struct{ w *fsnotify.Watcher }
+type Watcher struct {
+	w     *fsnotify.Watcher
+	events chan Event
+	done   chan struct{}
+
+	eventsClosed sync.Once
+	closeOnce    sync.Once
+}
 
 // New watches root plus its first-level subdirectories. Recursive watching
 // arrives with the git engine in Phase 2.
@@ -25,35 +33,76 @@ func New(root string) (*Watcher, error) {
 		w.Close()
 		return nil, err
 	}
-	entries, _ := os.ReadDir(root)
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		w.Close()
+		return nil, err
+	}
 	for _, e := range entries {
 		if e.IsDir() {
-			_ = w.Add(filepath.Join(root, e.Name()))
+			if err := w.Add(filepath.Join(root, e.Name())); err != nil {
+				w.Close()
+				return nil, err
+			}
 		}
 	}
-	return &Watcher{w: w}, nil
+	watcher := &Watcher{
+		w:     w,
+		events:   make(chan Event, 64),
+		done:     make(chan struct{}),
+	}
+	go watcher.forward()
+	return watcher, nil
 }
 
-func (w *Watcher) Events() <-chan Event {
-	out := make(chan Event, 64)
-	go func() {
-		for ev := range w.w.Events {
-			if ev.Op&fsnotify.Write != 0 {
-				out <- Event{Path: ev.Name, Op: "write"}
+func (w *Watcher) closeEvents() { w.eventsClosed.Do(func() { close(w.events) }) }
+
+func (w *Watcher) forward() {
+	for {
+		select {
+		case ev, ok := <-w.w.Events:
+			if !ok {
+				w.closeEvents()
+				return
 			}
-			if ev.Op&fsnotify.Create != 0 {
-				out <- Event{Path: ev.Name, Op: "create"}
+			var op string
+			switch {
+			case ev.Op&fsnotify.Create != 0:
+				op = "create"
+			case ev.Op&fsnotify.Write != 0:
+				op = "write"
+			case ev.Op&fsnotify.Remove != 0:
+				op = "remove"
+			case ev.Op&fsnotify.Rename != 0:
+				op = "rename"
+			default:
+				continue
 			}
-			if ev.Op&fsnotify.Remove != 0 {
-				out <- Event{Path: ev.Name, Op: "remove"}
+			select {
+			case w.events <- Event{Path: ev.Name, Op: op}:
+			case <-w.done:
+				w.closeEvents()
+				return
 			}
-			if ev.Op&fsnotify.Rename != 0 {
-				out <- Event{Path: ev.Name, Op: "rename"}
-			}
+		case <-w.done:
+			w.closeEvents()
+			return
 		}
-		close(out)
-	}()
-	return out
+	}
 }
 
-func (w *Watcher) Close() error { return w.w.Close() }
+// Events returns the event stream. It is idempotent: every call returns the
+// same channel, which is closed after Close.
+func (w *Watcher) Events() <-chan Event {
+	return w.events
+}
+
+// internalDone exposes the done channel for tests only.
+func (w *Watcher) internalDone() <-chan struct{} { return w.done }
+
+// Close stops forwarding and releases the underlying watcher. After Close,
+// the Events channel is eventually closed.
+func (w *Watcher) Close() error {
+	w.closeOnce.Do(func() { close(w.done) })
+	return w.w.Close()
+}

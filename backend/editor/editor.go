@@ -24,18 +24,27 @@ func (s *Service) Track(path, savedContent string) {
 func (s *Service) Dirty(path, current string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	_, ok := s.saved[path]
+	if !ok {
+		return false
+	}
 	return s.saved[path] != current
 }
 
 // Save writes content atomically via a hidden temp file + rename, then records
-// it as the last-saved content for path.
+// it as the last-saved content for path. The temp file is removed on any
+// error path.
 func (s *Service) Save(path, content string) error {
 	tmp := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".aide-tmp")
+	defer func() {
+		if _, statErr := os.Stat(tmp); statErr == nil {
+			os.Remove(tmp)
+		}
+	}()
 	if err := os.WriteFile(tmp, []byte(content), 0o644); err != nil {
 		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
 		return err
 	}
 	s.Track(path, content)

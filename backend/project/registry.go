@@ -41,12 +41,13 @@ func (r *Registry) Add(root string) (*Project, error) {
 	}
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	for _, p := range r.projects {
 		if p.Root == abs {
+			r.mu.Unlock()
 			return nil, fmt.Errorf("project already open: %s", abs)
 		}
 	}
+	var notifyFn func()
 	p := &Project{
 		ID:       uuid.NewString(),
 		Name:     filepath.Base(abs),
@@ -56,7 +57,9 @@ func (r *Registry) Add(root string) (*Project, error) {
 		EngineOK: true,
 	}
 	r.projects[p.ID] = p
-	r.notify()
+	notifyFn = r.notify
+	r.mu.Unlock()
+	notifyFn()
 	return p, nil
 }
 
@@ -74,20 +77,23 @@ func (r *Registry) List() []Project {
 func (r *Registry) Get(id string) (*Project, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	p, ok := r.projects[id]
+	proj, ok := r.projects[id]
 	if !ok {
 		return nil, fmt.Errorf("project not found: %s", id)
 	}
-	return p, nil
+	p := *proj
+	return &p, nil
 }
 
 func (r *Registry) Remove(id string) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if _, ok := r.projects[id]; !ok {
+		r.mu.Unlock()
 		return fmt.Errorf("project not found: %s", id)
 	}
 	delete(r.projects, id)
-	r.notify()
+	notifyFn := r.notify
+	r.mu.Unlock()
+	notifyFn()
 	return nil
 }
