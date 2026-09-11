@@ -25,10 +25,9 @@ const maxFileSize = 10 << 20 // 10MB
 
 // Entry is a node in a project tree listing. Path is absolute.
 type Entry struct {
-	Name   string `json:"name"`
-	Path   string `json:"path"`
-	Dir    bool   `json:"dir"`
-	DirAbs bool   `json:"dirAbs"` // is an absolute directory location
+	Name string `json:"name"`
+	Path string `json:"path"`
+	Dir  bool   `json:"dir"`
 }
 
 // App is the main service bound to the UI. Pure facade over engines;
@@ -40,6 +39,7 @@ type App struct {
 	buf      *editor.Service
 	mu       sync.Mutex
 	watchers map[string]*fswatch.Watcher
+	closed   map[string]bool
 }
 
 // New wires the engines together. sink receives all backend→UI events.
@@ -55,6 +55,7 @@ func NewWith(sink adapter.EventSink, storePath string) *App {
 		store:    project.NewStore(storePath),
 		buf:      editor.New(),
 		watchers: map[string]*fswatch.Watcher{},
+		closed:   map[string]bool{},
 	}
 }
 
@@ -70,15 +71,11 @@ func (a *App) OpenProject(root string) (project.Project, error) {
 
 	if w, werr := fswatch.New(p.Root); werr == nil {
 		a.mu.Lock()
-		if _, exists := a.watchers[p.ID]; !exists {
-			a.watchers[p.ID] = w
-			a.mu.Unlock()
-			go a.forwardWatcher(p.ID, w)
-		} else {
-			a.mu.Unlock()
-			w.Close()
-		}
+		a.watchers[p.ID] = w
+		a.mu.Unlock()
+		go a.forwardWatcher(p.ID, w)
 	} else {
+		a.reg.SetEngineOK(p.ID, false)
 		a.sink.Emit("engine.error", map[string]string{"projectId": p.ID, "message": werr.Error()})
 	}
 
@@ -88,6 +85,9 @@ func (a *App) OpenProject(root string) (project.Project, error) {
 
 func (a *App) forwardWatcher(projectID string, w *fswatch.Watcher) {
 	for ev, ok := <-w.Events(); ok; ev, ok = <-w.Events() {
+		if a.isClosed(projectID) {
+			continue
+		}
 		a.sink.Emit("fs.change", map[string]string{
 			"projectId": projectID,
 			"path":      ev.Path,
@@ -126,15 +126,23 @@ func (a *App) RemoveProject(id string) error {
 	return nil
 }
 
-// CloseWatcher stops and releases the watcher for projectID.
+// CloseWatcher stops and releases the watcher for projectID and marks the
+// project closed so the forwarder suppresses any buffered events.
 func (a *App) CloseWatcher(projectID string) {
 	a.mu.Lock()
 	w, ok := a.watchers[projectID]
 	delete(a.watchers, projectID)
+	a.closed[projectID] = true
 	a.mu.Unlock()
 	if ok {
 		w.Close()
 	}
+}
+
+func (a *App) isClosed(projectID string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.closed[projectID]
 }
 
 // ListTree walks root recursively to maxTreeDepth, dirs-first sorted, skipping
@@ -159,10 +167,9 @@ func walk(projectRoot, dir string, depth int) ([]Entry, error) {
 		}
 		path := filepath.Join(dir, name)
 		entry := Entry{
-			Name:   name,
-			Path:   path, // os.ReadDir on an absolute dir yields absolute paths already
-			Dir:    e.IsDir(),
-			DirAbs: e.IsDir(),
+			Name: name,
+			Path: path, // os.ReadDir on an absolute dir yields absolute paths already
+			Dir:  e.IsDir(),
 		}
 		if e.IsDir() {
 			dirs = append(dirs, entry)

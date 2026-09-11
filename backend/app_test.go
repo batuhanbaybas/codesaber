@@ -3,11 +3,13 @@ package backend
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
 
 type fakeSink struct {
+	mu     sync.Mutex
 	events []fakeEvent
 }
 
@@ -16,15 +18,25 @@ type fakeEvent struct {
 	payload any
 }
 
+// Emit may be called from multiple goroutines (e.g. the fswatch forwarder),
+// so the fake serializes access to its event log.
 func (f *fakeSink) Emit(name string, payload any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.events = append(f.events, fakeEvent{name: name, payload: payload})
+}
+
+func (f *fakeSink) snapshot() []fakeEvent {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]fakeEvent(nil), f.events...)
 }
 
 func (f *fakeSink) waitFor(t *testing.T, name string, timeout time.Duration) fakeEvent {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		for _, ev := range f.events {
+		for _, ev := range f.snapshot() {
 			if ev.name == name {
 				return ev
 			}
@@ -115,7 +127,7 @@ func TestFileSystemChangeEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := sinkEmit(sink.events, "project.added"); !ok {
+	if _, ok := sinkEmit(sink.snapshot(), "project.added"); !ok {
 		t.Fatal("expected project.added event")
 	}
 	target := filepath.Join(p.Root, "hello.txt")
@@ -150,7 +162,7 @@ func TestRemoveProject_StopsWatcher(t *testing.T) {
 	if err := app.RemoveProject(p.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := sinkEmit(sink.events, "project.removed"); !ok {
+	if _, ok := sinkEmit(sink.snapshot(), "project.removed"); !ok {
 		t.Fatal("expected project.removed event")
 	}
 	if _, err := app.reg.Get(p.ID); err == nil {

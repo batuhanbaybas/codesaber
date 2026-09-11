@@ -8,9 +8,4 @@ export interface Entry {
     "name": string;
     "path": string;
     "dir": boolean;
-
-    /**
-     * is an absolute directory location
-     */
-    "dirAbs": boolean;
 }

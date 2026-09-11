@@ -63,6 +63,17 @@ func (r *Registry) Add(root string) (*Project, error) {
 	return p, nil
 }
 
+// SetEngineOK updates the engine-health flag for an already-registered
+// project. The facade calls it after watcher setup succeeds or fails, before
+// emitting "project.added", so the payload reflects real engine status.
+func (r *Registry) SetEngineOK(id string, ok bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if p, exists := r.projects[id]; exists {
+		p.EngineOK = ok
+	}
+}
+
 func (r *Registry) List() []Project {
 	r.mu.Lock()
 	defer r.mu.Unlock()

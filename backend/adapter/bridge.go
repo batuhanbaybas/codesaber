@@ -5,7 +5,9 @@ package adapter
 import "github.com/wailsapp/wails/v3/pkg/application"
 
 // EventSink publishes backend events to the UI. Bridge implements it against
-// the Wails v3 event API; tests inject fakes.
+// the Wails v3 event API; tests inject fakes. Emit may be called concurrently
+// from multiple goroutines (e.g. the fswatch forwarder); implementations must
+// be safe for concurrent use.
 type EventSink interface {
 	Emit(name string, payload any)
 }

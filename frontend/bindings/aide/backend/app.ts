@@ -20,7 +20,8 @@ import * as project$0 from "./project/models.js";
 import * as $models from "./models.js";
 
 /**
- * CloseWatcher stops and releases the watcher for projectID.
+ * CloseWatcher stops and releases the watcher for projectID and marks the
+ * project closed so the forwarder suppresses any buffered events.
  */
 export function CloseWatcher(projectID: string): $CancellablePromise<void> {
     return $Call.ByID(250663456, projectID);
