@@ -3,7 +3,7 @@ import FileTree from './FileTree'
 import { useProjects } from '../state/projects'
 
 const Sidebar: React.FC = () => {
-  const { projects, open, remove } = useProjects()
+  const { projects, activeId, open, remove, setActive } = useProjects()
 
   return (
     <div className="bg-panel w-60 shrink-0 border-r border-panel flex flex-col text-xs">
@@ -16,7 +16,13 @@ const Sidebar: React.FC = () => {
       <div className="flex-1 overflow-y-auto">
         {projects.map((p) => (
           <div key={p.id} className="mb-1 border-b border-panel pb-1">
-            <div className="flex items-center gap-1 px-2 py-1.5">
+            <div
+              className={
+                'flex items-center gap-1 px-2 py-1.5 cursor-default ' +
+                (p.id === activeId ? 'bg-[#373940]' : 'hover:bg-[#2e3037]')
+              }
+              onClick={() => setActive(p.id)}
+            >
               <span
                 className={
                   'w-1.5 h-1.5 rounded-full shrink-0 ' +
@@ -33,14 +39,17 @@ const Sidebar: React.FC = () => {
                 </span>
               )}
               <button
-                onClick={() => void remove(p.id)}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void remove(p.id)
+                }}
                 className="no-drag px-1 text-dim hover:text-primary"
                 title="Remove project"
               >
                 &times;
               </button>
             </div>
-            <FileTree root={p.root} />
+            <FileTree root={p.root} projectId={p.id} />
           </div>
         ))}
         {projects.length === 0 && (
