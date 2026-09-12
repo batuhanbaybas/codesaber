@@ -12,6 +12,7 @@ const (
 type Change struct {
 	Path   string       `json:"path"`
 	Status ChangeStatus `json:"status"`
+	Size   int64        `json:"size,omitempty"`
 }
 
 type Status struct {

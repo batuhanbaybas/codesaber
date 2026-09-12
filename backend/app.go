@@ -4,6 +4,8 @@
 package backend
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,16 +15,13 @@ import (
 	"time"
 
 	"aide/backend/adapter"
+	"aide/backend/agentstore"
 	"aide/backend/editor"
 	"aide/backend/fswatch"
 	"aide/backend/git"
 	"aide/backend/lsp"
 	"aide/backend/project"
 	"aide/backend/terminal"
-
-	"context"
-
-	"aide/backend/agentstore"
 )
 
 // maxTreeDepth limits ListTree recursion (root children = depth 1).
@@ -57,6 +56,16 @@ const EventGitStatus = "git.status"
 
 // EventGitError reports git failures the UI should surface inline: {projectId, message}.
 const EventGitError = "git.error"
+
+// GitSyncInfo is the ahead/behind sync state relative to a remote.
+type GitSyncInfo struct {
+	Remote string `json:"remote"`
+	Branch string `json:"branch"`
+	Ahead  int    `json:"ahead"`
+	Behind int    `json:"behind"`
+}
+
+const maxStatsFiles = 25
 
 // EventLSPDiag carries gopls diagnostics for one file: {projectId, path, diagnostics[]}.
 const EventLSPDiag = "lsp.diag"
@@ -508,6 +517,58 @@ func (a *App) GitLog(projectID string, n int) ([]git.LogEntry, error) {
 		return nil, err
 	}
 	return e.Log(n)
+}
+
+// GitAheadBehind reports the ahead/behind counts versus the remote-tracking
+// branch of HEAD. Remote is always "origin" (MVP); a missing upstream or
+// absent tracking ref yields Remote "" with zeros instead of an error.
+func (a *App) GitAheadBehind(projectID string) (GitSyncInfo, error) {
+	info := GitSyncInfo{Remote: "origin"}
+	e, err := a.gitEngine(projectID)
+	if err != nil {
+		return GitSyncInfo{Remote: ""}, err
+	}
+	ahead, behind, aerr := e.AheadBehind(info.Remote)
+	if aerr != nil {
+		if errors.Is(aerr, git.ErrNoUpstream) {
+			info.Remote = ""
+			return info, nil
+		}
+		return GitSyncInfo{Remote: ""}, aerr
+	}
+	info.Ahead, info.Behind = ahead, behind
+	return info, nil
+}
+
+// GitFetch fetches all configured remotes (30s timeout, no auth MVP).
+func (a *App) GitFetch(projectID string) error {
+	e, err := a.gitEngine(projectID)
+	if err != nil {
+		return err
+	}
+	return e.Fetch()
+}
+
+// GitPush pushes HEAD to the first remote with its default refspec (MVP: no auth).
+func (a *App) GitPush(projectID string) error {
+	e, err := a.gitEngine(projectID)
+	if err != nil {
+		return err
+	}
+	return e.Push()
+}
+
+// GitStats computes on-demand per-file [additions, deletions]; capped at
+// maxStatsFiles paths per call to keep it cheap.
+func (a *App) GitStats(projectID string, paths []string, staged bool) (map[string][2]int, error) {
+	e, err := a.gitEngine(projectID)
+	if err != nil {
+		return nil, err
+	}
+	if len(paths) <= maxStatsFiles {
+		return e.Stats(paths, staged)
+	}
+	return e.Stats(paths[:maxStatsFiles], staged)
 }
 
 // emitGitStatus is the throttled entry point: it emits immediately when the

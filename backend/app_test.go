@@ -878,3 +878,29 @@ func TestTermInputUnknown(t *testing.T) {
 		t.Fatal("expected error for unknown termID")
 	}
 }
+
+func TestGitFacadeAheadBehindFetchPushStats(t *testing.T) {
+	root := initRepoGit(t)
+	app, _ := newTestApp(t)
+	p, _ := app.OpenProject(root)
+
+	if a, err := app.GitAheadBehind(p.ID); a.Remote != "" || err != nil {
+		t.Fatalf("no-upstream should yield Remote \"\", nil err: %+v err=%v", a, err)
+	}
+	if err := app.GitFetch(p.ID); err == nil {
+		t.Fatal("fetch without remote should error")
+	}
+	if err := app.GitPush(p.ID); err == nil {
+		t.Fatal("push without remote should error")
+	}
+	if err := os.WriteFile(filepath.Join(p.Root, "stats.txt"), []byte("a\nb\nc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := app.GitStats(p.ID, []string{"stats.txt"}, false)
+	if err != nil {
+		t.Fatalf("GitStats: %v", err)
+	}
+	if got := s["stats.txt"]; got[0] != 3 || got[1] != 0 {
+		t.Fatalf("stats: %+v", got)
+	}
+}

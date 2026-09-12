@@ -2,12 +2,14 @@ package git
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	git2 "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
@@ -86,6 +88,7 @@ func (e *Engine) Status() (Status, error) {
 	for _, group := range [][]Change{st.Staged, st.Unstaged, st.Untracked} {
 		sort.Slice(group, func(i, j int) bool { return group[i].Path < group[j].Path })
 	}
+	e.untrackedSizes(&st)
 	return st, nil
 }
 
@@ -443,4 +446,166 @@ func (e *Engine) DiffUnstaged(path string) (DiffPatch, error) {
 		return DiffPatch{}, err
 	}
 	return buildPatch(path, path, from, data)
+}
+
+// ErrNoUpstream reports that no remote-tracking ref exists for HEAD's branch.
+var ErrNoUpstream = errors.New("no upstream for current branch")
+
+const revWalkCap = 5000
+
+func (e *Engine) untrackedSizes(st *Status) {
+	for i := range st.Untracked {
+		c := &st.Untracked[i]
+		if fi, err := os.Stat(e.wt.Filesystem.Join(e.dir, c.Path)); err == nil {
+			c.Size = fi.Size()
+		} else {
+			c.Size = -1
+		}
+	}
+}
+
+// countPatchLineStats counts + and - line totals from the raw diff chunks.
+// Stats computes per-file [additions, deletions] for the given paths, against
+// HEAD (staged) or the index (unstaged). Untracked-style missing sides count as
+// whole-file additions/deletions.
+func (e *Engine) Stats(paths []string, staged bool) (map[string][2]int, error) {
+	out := make(map[string][2]int, len(paths))
+	for _, p := range paths {
+		var patch DiffPatch
+		var err error
+		if staged {
+			patch, err = e.DiffStaged(p)
+		} else {
+			patch, err = e.DiffUnstaged(p)
+		}
+		if err != nil {
+			return nil, err
+		}
+		var add, del int
+		for _, h := range patch.Hunks {
+			add += h.Additions
+			del += h.Deletions
+		}
+		out[p] = [2]int{add, del}
+	}
+	return out, nil
+}
+
+// remoteHash resolves refs/remotes/<remote>/<branch> for the current HEAD
+// branch; ErrNoUpstream when absent.
+func (e *Engine) remoteHash(remote string) (plumbing.Hash, error) {
+	head, err := e.r.Head()
+	if err != nil {
+		return plumbing.ZeroHash, err
+	}
+	branch := head.Name().Short()
+	if head.Name().IsTag() || branch == "" {
+		return plumbing.ZeroHash, ErrNoUpstream
+	}
+	ref, err := e.r.Reference(plumbing.NewRemoteReferenceName(remote, branch), false)
+	if err != nil {
+		return plumbing.ZeroHash, ErrNoUpstream
+	}
+	return ref.Hash(), nil
+}
+
+// ancestors returns the set of commit hashes reachable from start, capped.
+func (e *Engine) ancestors(start plumbing.Hash) map[plumbing.Hash]bool {
+	seen := map[plumbing.Hash]bool{}
+	queue := []plumbing.Hash{start}
+	for len(queue) > 0 && len(seen) < revWalkCap {
+		h := queue[0]
+		queue = queue[1:]
+		if h.IsZero() || seen[h] {
+			continue
+		}
+		commit, err := e.r.CommitObject(h)
+		if err != nil {
+			continue
+		}
+		seen[h] = true
+		queue = append(queue, commit.ParentHashes...)
+	}
+	return seen
+}
+
+// AheadBehind counts commits reachable from HEAD but not from the remote's
+// tracking ref (ahead) and the reverse (behind), capped at revWalkCap each.
+func (e *Engine) AheadBehind(remote string) (ahead, behind int, err error) {
+	head, err := e.r.Head()
+	if err != nil {
+		return 0, 0, err
+	}
+	base, err := e.remoteHash(remote)
+	if err != nil {
+		return 0, 0, err
+	}
+	if base == head.Hash() {
+		return 0, 0, nil
+	}
+	mine := e.ancestors(head.Hash())
+	theirs := e.ancestors(base)
+	for h := range mine {
+		if !theirs[h] {
+			ahead++
+		}
+	}
+	for h := range theirs {
+		if !mine[h] {
+			behind++
+		}
+	}
+	return ahead, behind, nil
+}
+
+// Fetch fetches all configured remotes with a 30s context, plain (untracked
+// credentials MVP).
+func (e *Engine) Fetch() error {
+	remotes, err := e.r.Remotes()
+	if err != nil {
+		return err
+	}
+	if len(remotes) == 0 {
+		return fmt.Errorf("no git remote configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var errs []string
+	for _, rem := range remotes {
+		if err := rem.FetchContext(ctx, &git2.FetchOptions{}); err != nil {
+			if errors.Is(err, git2.NoErrAlreadyUpToDate) {
+				continue
+			}
+			errs = append(errs, rem.Config().Name+": "+err.Error())
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("fetch failed: %s", strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// Push pushes HEAD to the first remote tracking-style refspec (MVP: no auth).
+func (e *Engine) Push() error {
+	remotes, err := e.r.Remotes()
+	if err != nil {
+		return err
+	}
+	if len(remotes) == 0 {
+		return fmt.Errorf("no git remote configured")
+	}
+	head, err := e.r.Head()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	rem := remotes[0]
+	err = rem.PushContext(ctx, &git2.PushOptions{
+		RefSpecs: []config.RefSpec{config.RefSpec(head.Name() + ":" + head.Name())},
+	})
+	if errors.Is(err, git2.NoErrAlreadyUpToDate) {
+		return nil
+	}
+	return err
 }
