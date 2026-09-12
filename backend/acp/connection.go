@@ -283,7 +283,16 @@ func (c *Conn) invokeHandler(method string, params any) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"optionId": optionID}, nil
+		// RequestPermissionOutcome (v1 schema): {"outcome":"selected",
+		// "optionId":...} when the user picked an option, or
+		// {"outcome":"cancelled"} when none.
+		var outcome any
+		if optionID == nil {
+			outcome = map[string]any{"outcome": "cancelled"}
+		} else {
+			outcome = map[string]any{"outcome": "selected", "optionId": optionID}
+		}
+		return map[string]any{"outcome": outcome}, nil
 	default:
 		return nil, &RPCError{Code: RPCMethodNotFound, Message: "acp: no handler for " + method}
 	}

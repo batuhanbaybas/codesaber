@@ -16,8 +16,8 @@ import (
 // agent process: writes to agentIn are read by the Conn (child stdout), writes
 // by the Conn to clientOut are read by the test (child stdin).
 type harnessConn struct {
-	conn    *Conn
-	agentIn *os.File // write side the fake agent "stdout" feeds
+	conn      *Conn
+	agentIn   *os.File // write side the fake agent "stdout" feeds
 	clientOut *os.File // read side of what the Conn writes (child stdin)
 }
 
