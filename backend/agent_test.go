@@ -608,6 +608,105 @@ func TestACPWriteGatedByPermission(t *testing.T) {
 	}
 }
 
+// waitForPermission returns the latest fs-write permission event whose isNew
+// and truncated flags match want (waitFor returns the FIRST match, which
+// would race with the prior card when the sink still holds earlier events).
+func waitForPermission(t *testing.T, sink *fakeSink, isNew, truncated bool) fakeEvent {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		evs := sink.snapshot()
+		for i := len(evs) - 1; i >= 0; i-- {
+			ev := evs[i]
+			if ev.name != EventACPPermission {
+				continue
+			}
+			m := ev.payload.(map[string]any)
+			if m["isNew"] == isNew && m["truncated"] == truncated {
+				return ev
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for permission event isNew=%v truncated=%v", isNew, truncated)
+	return fakeEvent{}
+}
+
+// TestACPWritePermissionDiffPayload verifies the fs-write permission event
+// carries the diff-review fields: old on-disk text, requested new text,
+// isNew, and the truncated flag once the combined size exceeds the cap.
+func TestACPWritePermissionDiffPayload(t *testing.T) {
+	app, sink, pid := newAgentTestApp(t)
+	fp := &fakePrompter{}
+	installFakeAgent(t, fp)
+	root, err := app.resolveRoot(pid)
+	if err != nil {
+		t.Fatalf("resolveRoot: %v", err)
+	}
+
+	var writeHandler func(sessionID, path, content string) error
+	prev := acpStartSession
+	acpStartSession = func(ctx context.Context, root string, profile acp.Info, handlers acp.ClientHandlers) (acpPrompter, error) {
+		writeHandler = handlers.WriteTextFile
+		return fp, nil
+	}
+	t.Cleanup(func() { acpStartSession = prev })
+	if err := app.ACPStart(pid, "opencode"); err != nil {
+		t.Fatalf("ACPStart: %v", err)
+	}
+
+	// new file: isNew + empty oldText
+	target := filepath.Join(root, "fresh.txt")
+	done := make(chan error, 1)
+	go func() { done <- writeHandler("s", target, "line1\nline2") }()
+	ev := waitForPermission(t, sink, true, false)
+	m := ev.payload.(map[string]any)
+	if m["isNew"] != true || m["oldText"] != "" || m["newText"] != "line1\nline2" || m["truncated"] != false {
+		t.Fatalf("new-file payload = %#v, want isNew oldText='' newText=full truncated=false", m)
+	}
+	reqID := m["requestId"].(string)
+	if err := app.ACPRespondPermission(pid, reqID, "deny", false); err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+	<-done
+
+	// existing file: oldText from disk, isNew=false
+	if err := os.WriteFile(target, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	go func() { done <- writeHandler("s", target, "new\n") }()
+	ev2 := waitForPermission(t, sink, false, false)
+	m2 := ev2.payload.(map[string]any)
+	if m2["isNew"] != false || m2["oldText"] != "old\n" || m2["newText"] != "new\n" {
+		t.Fatalf("edit payload = %#v, want isNew=false oldText='old\\n' newText='new\\n'", m2)
+	}
+	reqID = m2["requestId"].(string)
+	if err := app.ACPRespondPermission(pid, reqID, "deny", false); err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+	<-done
+
+	// oversized: truncated=true and both sides capped to the 64KB budget
+	big := strings.Repeat("x", 200<<10) + "\n"
+	go func() { done <- writeHandler("s", target, big+big) }()
+	ev3 := waitForPermission(t, sink, false, true)
+	m3 := ev3.payload.(map[string]any)
+	if m3["truncated"] != true {
+		t.Fatalf("oversized payload truncated = %v, want true", m3["truncated"])
+	}
+	if ot, _ := m3["oldText"].(string); len(ot) > 64<<10 {
+		t.Fatalf("capped oldText too long: %d", len(ot))
+	}
+	if nt, _ := m3["newText"].(string); len(nt) > 64<<10 {
+		t.Fatalf("capped newText too long: %d", len(nt))
+	}
+	reqID = m3["requestId"].(string)
+	if err := app.ACPRespondPermission(pid, reqID, "deny", false); err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+	<-done
+}
+
 // TestNoteToolFirstTitleLater verifies the first-title-later pattern: a
 // tool_call with no title is not persisted until the title arrives, then
 // persisted exactly once.

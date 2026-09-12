@@ -39,6 +39,14 @@ const acpPermissionTimeout = 60 * time.Second
 // context windows and memory bounded.
 const acpMaxFileBytes = 10 << 20 // 10MB
 
+// acpWriteDiffCaps bound the diff-review payload attached to fs-write
+// permission events: cappedText is the per-side slice size used when the
+// combined content exceeds totalCap.
+const (
+	acpWriteDiffTotalCap = 256 << 10 // 256KB
+	acpWriteDiffCapped   = 64 << 10  // 64KB per side
+)
+
 // acpPrompter is the seam over acp.Session the facade drives (swap for fakes
 // in tests).
 type acpPrompter interface {
@@ -387,7 +395,7 @@ func (a *App) acpSpawnOnAgent(projectID string, ag *agentSession, profile acp.In
 			if cerr != nil {
 				return cerr
 			}
-			choice, perr := a.acpFsWritePermission(projectID, ag, path)
+			choice, perr := a.acpFsWritePermission(projectID, ag, path, content)
 			if perr != nil {
 				return perr
 			}
@@ -400,6 +408,18 @@ func (a *App) acpSpawnOnAgent(projectID string, ag *agentSession, profile acp.In
 			if werr := os.WriteFile(p, []byte(content), 0o644); werr != nil {
 				return fmt.Errorf("acp: write %s: %w", path, werr)
 			}
+			// accepted diff: surface a tool card note (one card per target path)
+			toolID := "fsWrite:" + path
+			title := "diff applied ✓ — " + path
+			if ag.noteTool(toolID, title) {
+				_ = a.chats.Append(projectID, agentstore.Entry{
+					Role: "agent", Kind: agentstore.KindTool, Text: title, ToolID: toolID,
+				})
+			}
+			a.sink.Emit(EventACPTool, map[string]any{
+				"projectId": projectID, "toolCallId": toolID, "title": title,
+				"kind": "edit", "status": "completed", "content": "",
+			})
 			return nil
 		},
 		RequestPermission: func(params map[string]any) (any, error) {
@@ -481,10 +501,11 @@ func (a *App) acpRequestPermission(projectID string, ag *agentSession, params ma
 
 // acpFsWritePermission gates an agent fs/write_text_file request: it registers
 // a pending permission under the same routing as session/request_permission,
-// emits acp.permission with purpose=fs-write plus the target path, and blocks
-// for the user's answer (or the timeout, which denies). Returns true only for
-// an explicit allow.
-func (a *App) acpFsWritePermission(projectID string, ag *agentSession, path string) (bool, error) {
+// emits acp.permission with purpose=fs-write plus the target path and a
+// diff-review payload (old on-disk text vs requested new text, byte-capped),
+// and blocks for the user's answer (or the timeout, which denies). Returns
+// true only for an explicit allow.
+func (a *App) acpFsWritePermission(projectID string, ag *agentSession, path, content string) (bool, error) {
 	ag.mu.Lock()
 	ag.nextID++
 	id := fmt.Sprintf("perm-%d", ag.nextID)
@@ -497,11 +518,33 @@ func (a *App) acpFsWritePermission(projectID string, ag *agentSession, path stri
 		ag.mu.Unlock()
 	}()
 
+	oldText := ""
+	isNew := true
+	ag.mu.Lock()
+	root := ag.root
+	ag.mu.Unlock()
+	if p, cerr := containedPath(root, path); cerr == nil {
+		if b, err := os.ReadFile(p); err == nil {
+			isNew = false
+			oldText = string(b)
+		}
+	}
+	truncated := false
+	if len(oldText)+len(content) > acpWriteDiffTotalCap {
+		oldText = capDiffText(oldText, acpWriteDiffCapped)
+		content = capDiffText(content, acpWriteDiffCapped)
+		truncated = true
+	}
+
 	a.sink.Emit(EventACPPermission, map[string]any{
 		"projectId": projectID,
 		"requestId": id,
 		"purpose":   "fs-write",
 		"path":      path,
+		"oldText":   oldText,
+		"newText":   content,
+		"isNew":     isNew,
+		"truncated": truncated,
 		"options": []any{
 			map[string]any{"optionId": "allow", "name": "Allow", "kind": "allow_once"},
 			map[string]any{"optionId": "deny", "name": "Deny", "kind": "reject_once"},
@@ -517,6 +560,19 @@ func (a *App) acpFsWritePermission(projectID string, ag *agentSession, path stri
 	case <-time.After(acpPermissionTimeout):
 		return false, nil
 	}
+}
+
+// capDiffText slices s to at most max bytes, snapping to the last newline so
+// the preview does not end on a partial line.
+func capDiffText(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := s[:max]
+	if i := strings.LastIndexByte(cut, '\n'); i > 0 {
+		cut = cut[:i+1]
+	}
+	return cut
 }
 
 // acpUpdateHandler translates session/update notifications into UI events and

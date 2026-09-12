@@ -33,6 +33,12 @@ export interface PendingPermission {
   options: PermissionOption[]
   purpose?: string
   path?: string
+  // diff-review payload (fs-write only): current on-disk text vs requested
+  // text. isNew=true means the file does not exist yet (create).
+  oldText?: string
+  newText?: string
+  isNew?: boolean
+  truncated?: boolean
 }
 
 export interface PermissionOption {
@@ -197,13 +203,18 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({
       })
     })
     const onPermission = Events.On('acp.permission', (ev: any) => {
-      const { projectId, requestId, options, purpose, path } = (ev.data ?? {}) as {
-        projectId?: string
-        requestId?: string
-        options?: unknown
-        purpose?: string
-        path?: string
-      }
+      const { projectId, requestId, options, purpose, path, oldText, newText, isNew, truncated } =
+        (ev.data ?? {}) as {
+          projectId?: string
+          requestId?: string
+          options?: unknown
+          purpose?: string
+          path?: string
+          oldText?: string
+          newText?: string
+          isNew?: boolean
+          truncated?: boolean
+        }
       if (!projectId || !requestId) return
       const opts = Array.isArray(options)
         ? (options.map(asPermissionOption).filter(Boolean) as PermissionOption[])
@@ -215,7 +226,19 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({
           (p) => p.requestId === requestId,
         )
           ? s.pendingPermissions
-          : [...s.pendingPermissions, { requestId, options: opts, purpose, path }],
+          : [
+              ...s.pendingPermissions,
+              {
+                requestId,
+                options: opts,
+                purpose,
+                path,
+                oldText,
+                newText,
+                isNew,
+                truncated,
+              },
+            ],
       }))
     })
     const onState = Events.On('acp.state', (ev: any) => {

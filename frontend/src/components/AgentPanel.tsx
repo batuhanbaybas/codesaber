@@ -3,8 +3,10 @@ import { useProjects } from '../state/projects'
 import {
   useAgent,
   type ChatMessage,
+  type PendingPermission,
   type ToolCard,
 } from '../state/agent'
+import MiniDiff, { diffCounts } from './MiniDiff'
 
 const statusDot = (status: string) => {
   if (status === 'in_progress' || status === 'pending')
@@ -166,43 +168,55 @@ const AgentPanel: React.FC = () => {
           key={p.requestId}
           className="shrink-0 mx-2 mb-1 rounded border border-[#e6c07b]/40 bg-[#1e1f22] p-2"
         >
-          <div className="text-[11px] text-[#e6c07b] mb-1">
-            {p.purpose === 'fs-write'
-              ? `Write permission requested${p.path ? ` — ${p.path}` : ''}`
-              : 'Permission requested'}
-          </div>
-          {p.options.length === 0 ? (
-            <div className="text-dim">(no options offered)</div>
+          {p.purpose === 'fs-write' ? (
+            <DiffReviewCard
+              p={p}
+              onAccept={() =>
+                void respondPermission(activeId, p.requestId, 'allow', false)
+              }
+              onReject={() =>
+                void respondPermission(activeId, p.requestId, '', true)
+              }
+            />
           ) : (
-            <div className="flex flex-col gap-1">
-              {p.options.map((o) => (
-                <button
-                  key={o.optionId ?? o.name}
-                  className="text-left px-2 py-1 rounded bg-[#2a2c31] hover:bg-[#373940]"
-                  onClick={() =>
-                    void respondPermission(
-                      activeId,
-                      p.requestId,
-                      o.optionId ?? '',
-                      false,
-                    )
-                  }
-                >
-                  <span className="text-primary">{o.name ?? o.optionId}</span>
-                  {o.description && (
-                    <span className="text-dim"> — {o.description}</span>
-                  )}
-                </button>
-              ))}
-              <button
-                className="text-left px-2 py-1 rounded text-[#e5735f] hover:bg-[#2a2c31]"
-                onClick={() =>
-                  void respondPermission(activeId, p.requestId, '', true)
-                }
-              >
-                Reject
-              </button>
-            </div>
+            <>
+              <div className="text-[11px] text-[#e6c07b] mb-1">
+                Permission requested
+              </div>
+              {p.options.length === 0 ? (
+                <div className="text-dim">(no options offered)</div>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {p.options.map((o) => (
+                    <button
+                      key={o.optionId ?? o.name}
+                      className="text-left px-2 py-1 rounded bg-[#2a2c31] hover:bg-[#373940]"
+                      onClick={() =>
+                        void respondPermission(
+                          activeId,
+                          p.requestId,
+                          o.optionId ?? '',
+                          false,
+                        )
+                      }
+                    >
+                      <span className="text-primary">{o.name ?? o.optionId}</span>
+                      {o.description && (
+                        <span className="text-dim"> — {o.description}</span>
+                      )}
+                    </button>
+                  ))}
+                  <button
+                    className="text-left px-2 py-1 rounded text-[#e5735f] hover:bg-[#2a2c31]"
+                    onClick={() =>
+                      void respondPermission(activeId, p.requestId, '', true)
+                    }
+                  >
+                    Reject
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       ))}
@@ -241,6 +255,58 @@ const AgentPanel: React.FC = () => {
         </div>
       </div>
     </div>
+  )
+}
+
+// DiffReviewCard surfaces an agent fs-write request: header (create/edit +
+// path + +/- counts), inline mini diff, and Reject/Accept actions mapped to
+// ACPRespondPermission (cancel / allow).
+const DiffReviewCard: React.FC<{
+  p: PendingPermission
+  onAccept: () => void
+  onReject: () => void
+}> = ({ p, onAccept, onReject }) => {
+  const oldText = p.oldText ?? ''
+  const newText = p.newText ?? ''
+  const counts = diffCounts(oldText, newText)
+  return (
+    <>
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-[11px] text-[#e6c07b] font-medium">
+          {p.isNew ? 'Create file' : 'Edit file'}
+        </span>
+        <span
+          className="text-[11px] text-dim truncate min-w-0"
+          title={p.path}
+        >
+          {p.path}
+        </span>
+        <span className="ml-auto shrink-0 text-[10px] font-mono">
+          <span className="text-[var(--added)]">+{counts.adds}</span>{' '}
+          <span className="text-[var(--danger)]">−{counts.dels}</span>
+        </span>
+      </div>
+      <MiniDiff oldText={oldText} newText={newText} />
+      {p.truncated && (
+        <div className="mt-1 text-[10px] text-[#e6c07b]/80">
+          preview truncated — open full diff after applying
+        </div>
+      )}
+      <div className="flex gap-1.5 mt-1.5">
+        <button
+          className="no-drag px-3 py-1 rounded bg-[#2a2c31] text-[#e5735f] hover:bg-[#373940]"
+          onClick={onReject}
+        >
+          Reject
+        </button>
+        <button
+          className="no-drag ml-auto px-3 py-1 rounded bg-[var(--accent)] text-[#0b0c10] font-medium hover:opacity-90"
+          onClick={onAccept}
+        >
+          Accept
+        </button>
+      </div>
+    </>
   )
 }
 
