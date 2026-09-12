@@ -69,7 +69,7 @@ func EnsureWorkspaceWindow() {
 		w.Show()
 		return
 	}
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
+	w := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             WorkspaceWindowName,
 		Title:            "aide",
 		Width:            1000,
@@ -78,4 +78,7 @@ func EnsureWorkspaceWindow() {
 		BackgroundColour: application.NewRGB(6, 7, 15),
 		URL:              "/#workspace",
 	})
+	// beta.20: runtime-created windows only show after WebViewDidFinishNavigation,
+	// which doesn't reliably fire here — show explicitly.
+	w.Show()
 }
