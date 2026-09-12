@@ -1,6 +1,7 @@
 import React from 'react'
 import { useProjects } from '../state/projects'
 import { useTabs } from '../state/tabs'
+import FileIcon from './FileIcon'
 
 const EditorTabs: React.FC = () => {
   const { activeId } = useProjects()
@@ -10,18 +11,22 @@ const EditorTabs: React.FC = () => {
   const active = state?.active ?? null
 
   return (
-    <div className="flex items-stretch bg-panel text-xs border-b border-panel shrink-0 min-h-[28px]">
+    <div className="flex items-stretch bg-panel text-xs h-[34px] shrink-0 overflow-x-auto">
       {tabs.map((tab) => (
         <div
           key={tab.path}
           className={
-            'group flex items-center gap-2 px-3 border-r border-panel cursor-default ' +
+            'group relative flex items-center gap-2 px-3 border-r border-panel cursor-default shrink-0 ' +
             (tab.path === active
-              ? 'bg-editor text-primary border-t-2 border-t-[var(--accent)]'
-              : 'text-dim hover:text-primary')
+              ? 'bg-[#1e1f22] text-primary'
+              : 'text-dim hover:text-primary hover:bg-white/4')
           }
           onClick={() => activeId && setActive(activeId, tab.path)}
         >
+          {tab.path === active && (
+            <span className="absolute top-0 left-0 right-0 h-[2px] bg-[var(--accent)]" />
+          )}
+          <FileIcon path={tab.path} />
           <span>{tab.title}</span>
           {tab.kind === 'diff' && (
             <span
@@ -45,6 +50,14 @@ const EditorTabs: React.FC = () => {
           </button>
         </div>
       ))}
+      <button
+        className="shrink-0 px-2.5 text-dim hover:text-primary"
+        title="New file (coming soon)"
+        aria-label="New file"
+        disabled
+      >
+        {'\uFF0B'}
+      </button>
       <div className="flex-1" />
     </div>
   )

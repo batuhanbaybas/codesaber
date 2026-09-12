@@ -3,6 +3,7 @@ import * as App from '../../bindings/aide/backend/app'
 import type { Entry } from '../../bindings/aide/backend/models'
 import { useProjects } from '../state/projects'
 import { useTabs } from '../state/tabs'
+import FileIcon from './FileIcon'
 
 const MAX_CHILDREN = 200
 
@@ -138,6 +139,7 @@ const FileTree: React.FC<{ root: string; projectId: string }> = ({
           <span className="w-2 text-dim text-[9px]">
             {row.dir ? (openDirs.has(row.path) ? '\u25be' : '\u25b8') : ''}
           </span>
+          <FileIcon path={row.path} dir={row.dir} open={openDirs.has(row.path)} />
           <span className={row.more || !row.dir ? 'text-dim' : 'text-primary'}>
             {row.name}
           </span>
