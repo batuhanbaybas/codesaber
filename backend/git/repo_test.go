@@ -183,3 +183,13 @@ func TestBranchesAndCheckout(t *testing.T) {
 		t.Fatalf("branch config should be bare: remote=%q merge=%q", b.Remote, b.Merge)
 	}
 }
+
+func TestBranchAt(t *testing.T) {
+	dir := initRepo(t)
+	if got := BranchAt(dir); got != "master" && got != "main" {
+		t.Fatalf("BranchAt: %q", got)
+	}
+	if got := BranchAt(t.TempDir()); got != "" {
+		t.Fatalf("non-repo branch: %q", got)
+	}
+}

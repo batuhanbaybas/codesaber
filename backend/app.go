@@ -95,6 +95,11 @@ func (a *App) OpenProject(root string) (project.Project, error) {
 	if err != nil {
 		return project.Project{}, err
 	}
+	// Fill in the real branch before Remember/emitting so the recents store
+	// and "project.added" payload carry the true value, not the stub.
+	if b := git.BranchAt(p.Root); b != "" {
+		p.Branch = b
+	}
 	a.store.Remember(p.ID, p.Root, p.Branch)
 
 	if w, werr := fswatch.New(p.Root); werr == nil {

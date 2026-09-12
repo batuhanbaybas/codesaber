@@ -38,6 +38,20 @@ func New(dir string) (*Engine, error) {
 	return &Engine{dir: dir, r: r, wt: wt}, nil
 }
 
+// BranchAt returns the short branch name of the repository rooted at root,
+// or "" when root is not a repo or has no commit yet.
+func BranchAt(root string) string {
+	r, err := git2.PlainOpen(root)
+	if err != nil {
+		return ""
+	}
+	head, err := r.Head()
+	if err != nil {
+		return ""
+	}
+	return head.Name().Short()
+}
+
 func mapStatus(c git2.StatusCode) ChangeStatus {
 	switch c {
 	case git2.Added:
