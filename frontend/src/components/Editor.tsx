@@ -22,6 +22,7 @@ import { css } from '@codemirror/lang-css'
 import { html } from '@codemirror/lang-html'
 import { json } from '@codemirror/lang-json'
 import { go } from '@codemirror/legacy-modes/mode/go'
+import { darkSyntax } from '../lib/syntaxTheme'
 import { Events } from '@wailsio/runtime'
 import { useProjects } from '../state/projects'
 import { useTabs, type Tab } from '../state/tabs'
@@ -338,6 +339,7 @@ const TabEditor: React.FC<{
           diagGutter,
           basicSetup,
           theme,
+          darkSyntax,
           lspTheme,
           keymap.of([
             {
