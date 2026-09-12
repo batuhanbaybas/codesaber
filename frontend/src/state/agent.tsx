@@ -56,13 +56,15 @@ interface AgentContextValue {
   send: (projectId: string, text: string) => Promise<void>
   start: (projectId: string, harnessName: string) => Promise<void>
   stop: (projectId: string) => Promise<void>
-  newSession: (projectId: string) => Promise<void>
+   newSession: (projectId: string) => Promise<void>
   respondPermission: (
     projectId: string,
     requestId: string,
     optionId: string,
     cancel: boolean,
   ) => Promise<void>
+  /** One-shot prompt turn with the last agent text captured (AI commit msg). */
+  generateCommit: (projectId: string, prompt: string) => Promise<string>
 }
 
 const emptyState: AgentProjectState = {
@@ -289,6 +291,59 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({
     [],
   )
 
+  // generateCommit runs one synchronous prompt turn and resolves with the
+  // LAST agent text captured via acp.msg. The turn is considered done when
+  // the backend reports an idle acp.state (or on a 30s timeout). It listens
+  // with local handlers so it never races the panel's own subscriptions.
+  const generateCommit = useCallback(
+    async (projectId: string, prompt: string): Promise<string> => {
+      let captured = ''
+      let done = false
+      return new Promise<string>((resolve, reject) => {
+        const fail = (why: string) => {
+          if (done) return
+          done = true
+          offMsg()
+          offState()
+          clearTimeout(timer)
+          reject(new Error(why))
+        }
+        const succeed = () => {
+          if (done) return
+          done = true
+          offMsg()
+          offState()
+          clearTimeout(timer)
+          const text = captured.trim()
+          if (text) resolve(text)
+          else reject(new Error('empty reply'))
+        }
+        const timer = setTimeout(() => fail('timeout'), 30000)
+        const offMsg = Events.On('acp.msg', (ev: any) => {
+          const { projectId: pid, role, text } = (ev.data ?? {}) as {
+            projectId?: string
+            role?: string
+            text?: string
+          }
+          if (pid !== projectId || !text) return
+          if (role === 'agent') captured = text
+        })
+        const offState = Events.On('acp.state', (ev: any) => {
+          const { projectId: pid, state: st } = (ev.data ?? {}) as {
+            projectId?: string
+            state?: AgentState
+          }
+          if (pid !== projectId) return
+          if (st === 'idle') succeed()
+          else if (st === 'harness-down' || st === 'no-harness')
+            fail('harness down')
+        })
+        App.ACPSendPrompt(projectId, prompt).catch((e) => fail(String(e)))
+      })
+    },
+    [],
+  )
+
   const start = useCallback(
     async (projectId: string, harnessName: string) => {
       await App.ACPStart(projectId, harnessName)
@@ -344,6 +399,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({
         stop,
         newSession,
         respondPermission,
+        generateCommit,
       }}
     >
       {children}
