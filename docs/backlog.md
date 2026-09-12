@@ -49,9 +49,9 @@ Legend: ✅ done · 🚧 in progress · ⬜ todo · 📌 deferred (was requested
 - ✅ xterm.js frontend, streaming over ⌘P-style event channel, resize propagation
 - ✅ Multiple tabs
 
-## Phase 6 — Polish ⬜
+## Phase 6 — Design & Polish 🚧 (visual pass done 2026-09-12)
 
-- ⬜ Syntax theme pass (fix low-contrast legacy-mode Go colors) · light theme ("Milk")
+- ✅ Syntax theme pass (readable JetBrains-dark across lezer + legacy modes) · 📌 light theme ("Milk") still pending
 - ⬜ tree-sitter (WASM) symbol index + text search replacing IndexFiles walk
 - ⬜ Error surfacing for stale recents / duplicate project opens
 - ⬜ Welcome screen refinement, keymap review
@@ -62,3 +62,13 @@ Legend: ✅ done · 🚧 in progress · ⬜ todo · 📌 deferred (was requested
 - ⬜ Rust/Java language support (grammar config)
 - ⬜ Multi-window per project, detachable agent window
 - ⬜ ReadFile/SaveFile path containment (tracked MVP trade-off)
+
+## Phase 6.5 — Design polish round (2026-09-12, per user mockups)
+
+- ✅ Git panel redesign: cards/sections, language chips, per-file +/− stats + binary sizes, branch box w/ upstream sync↑↓, Fetch/Push, History tab w/ recent commits, AI commit-message gen (via running harness), split Commit & Push
+- ✅ Activity rail icons (files/search/git+badge/terminal/settings/apps)
+- ✅ Titlebar: breadcrumb (project › branch › file), ⌘P search capsule, panel toggle icons
+- ✅ File-type icons in tree + editor tabs; dock tab icons w/ badge
+- ✅ Minimap column; readable dark syntax theme
+- ✅ Status bar: Ln/Col cursor, diag counters (● errors/▲ warnings), Spaces 2, UTF-8, language label, aide v0.2.4
+- 📌 Pending from spec: light "Milk" theme, tree-sitter search/index, welcome-screen refinements, error surfacing for stale recents
