@@ -144,6 +144,22 @@ func TestFileSystemChangeEvents(t *testing.T) {
 	}
 }
 
+func TestOpenProject_EmitsEngineStatus(t *testing.T) {
+	app, sink := newTestApp(t)
+	p, err := app.OpenProject(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev := sink.waitFor(t, "engine.status", 5*time.Second)
+	payload, ok := ev.payload.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected engine.status payload type %T", ev.payload)
+	}
+	if payload["engine"] != "fswatch" || payload["ok"] != true || payload["projectId"] != p.ID {
+		t.Fatalf("bad engine.status payload: %+v", payload)
+	}
+}
+
 func sinkEmit(events []fakeEvent, name string) (fakeEvent, bool) {
 	for _, ev := range events {
 		if ev.name == name {

@@ -30,6 +30,10 @@ type Entry struct {
 	Dir  bool   `json:"dir"`
 }
 
+// EventEngineStatus is emitted when an engine's health changes for a project
+// (currently: fswatch watcher startup success/failure).
+const EventEngineStatus = "engine.status"
+
 // App is the main service bound to the UI. Pure facade over engines;
 // all engine state is per-project, namespaced by Project.ID.
 type App struct {
@@ -74,8 +78,14 @@ func (a *App) OpenProject(root string) (project.Project, error) {
 		a.watchers[p.ID] = w
 		a.mu.Unlock()
 		go a.forwardWatcher(p.ID, w)
+		a.sink.Emit(EventEngineStatus, map[string]any{
+			"engine": "fswatch", "ok": true, "projectId": p.ID,
+		})
 	} else {
 		a.reg.SetEngineOK(p.ID, false)
+		a.sink.Emit(EventEngineStatus, map[string]any{
+			"engine": "fswatch", "ok": false, "projectId": p.ID,
+		})
 		a.sink.Emit("engine.error", map[string]string{"projectId": p.ID, "message": werr.Error()})
 	}
 
