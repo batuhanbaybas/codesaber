@@ -142,6 +142,16 @@ const GearIcon: Icon = (props) => (
   </svg>
 )
 
+const BotIcon: Icon = (props) => (
+  <svg {...iconProps} {...props}>
+    <rect x="4" y="8" width="16" height="11" rx="3" />
+    <path d="M12 8V4.5" />
+    <circle cx="12" cy="3.5" r="1.2" />
+    <circle cx="9" cy="13.5" r="1" fill="currentColor" stroke="none" />
+    <circle cx="15" cy="13.5" r="1" fill="currentColor" stroke="none" />
+  </svg>
+)
+
 const GridIcon: Icon = (props) => (
   <svg {...iconProps} {...props} fill="currentColor" stroke="none">
     {[6, 12, 18].flatMap((y) =>
@@ -232,6 +242,14 @@ const ActivityRail: React.FC<{
 const WorkspaceInner: React.FC = () => {
   const { ui, toggle, setSize } = useLayout()
   const [dockTab, setDockTab] = useState<'agent' | 'git'>('git')
+  const { activeId } = useProjects()
+  const { status } = useGit()
+  const st = activeId ? status[activeId] : undefined
+  const changed = st
+    ? (st.staged?.length ?? 0) +
+      (st.unstaged?.length ?? 0) +
+      (st.untracked?.length ?? 0)
+    : 0
 
   // Rail → dock tab coordination: the rail can force the dock onto a tab
   // (git badge click) without lifting tab state into the layout provider.
@@ -312,25 +330,32 @@ const WorkspaceInner: React.FC = () => {
           <div className="flex items-center border-b border-panel text-xs">
             <button
               className={
-                'px-3 py-2 border-l-2 ' +
+                'relative flex items-center gap-1.5 px-3 py-2 ' +
                 (dockTab === 'agent'
-                  ? 'border-[var(--accent)] text-primary'
-                  : 'border-transparent text-dim hover:text-primary')
+                  ? 'text-primary after:absolute after:left-2 after:right-2 after:bottom-0 after:h-[2px] after:bg-[var(--accent)] after:rounded-t'
+                  : 'text-dim hover:text-primary')
               }
               onClick={() => setDockTab('agent')}
             >
+              <BotIcon />
               Agent
             </button>
             <button
               className={
-                'px-3 py-2 border-l-2 ' +
+                'relative flex items-center gap-1.5 px-3 py-2 ' +
                 (dockTab === 'git'
-                  ? 'border-[var(--accent)] text-primary'
-                  : 'border-transparent text-dim hover:text-primary')
+                  ? 'text-primary after:absolute after:left-2 after:right-2 after:bottom-0 after:h-[2px] after:bg-[var(--accent)] after:rounded-t'
+                  : 'text-dim hover:text-primary')
               }
               onClick={() => setDockTab('git')}
             >
+              <BranchIcon />
               Git
+              {changed > 0 && (
+                <span className="rounded-full bg-[#3b5bfd] text-[9px] text-white px-1 h-3.5 min-w-3.5 flex items-center justify-center font-medium">
+                  {changed > 99 ? '99+' : changed}
+                </span>
+              )}
             </button>
             <button
               onClick={() => toggle('rightDock')}
@@ -338,7 +363,7 @@ const WorkspaceInner: React.FC = () => {
               title="Collapse dock (⌘D)"
               aria-label="Collapse right dock"
             >
-              {'\u2039'}
+              {'\u00bb'}
             </button>
           </div>
           <div className="flex-1 min-h-0 flex flex-col">

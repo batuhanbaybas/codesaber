@@ -59,14 +59,14 @@ const theme = EditorView.theme(
     '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)' },
     '.cm-gutters': {
       backgroundColor: 'var(--bg-editor)',
-      color: 'var(--text-dim)',
+      color: '#4a4f55',
       border: 'none',
       paddingRight: '8px',
     },
     '.cm-activeLine': { backgroundColor: 'rgba(255, 255, 255, 0.045)' },
     '.cm-activeLineGutter': {
       backgroundColor: 'rgba(255, 255, 255, 0.045)',
-      color: 'var(--text-primary)',
+      color: '#c8ccd2',
     },
     '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': {
       backgroundColor: 'rgba(74, 91, 252, 0.30)',
