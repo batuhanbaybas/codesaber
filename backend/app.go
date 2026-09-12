@@ -53,8 +53,8 @@ const EventGitStatus = "git.status"
 const EventGitError = "git.error"
 
 // gitStatusThrottle collapses fs-event storms: per project, git.status events
-// are emitted at most once per window; a dropped emit is recovered by the next
-// fs event that triggers emitGitStatus again.
+// are emitted at most once per window; a change arriving inside the window
+// arms one trailing timer so the FINAL state of a burst is always emitted.
 const gitStatusThrottle = 400 * time.Millisecond
 
 // App is the main service bound to the UI. Pure facade over engines;
@@ -68,6 +68,7 @@ type App struct {
 	watchers    map[string]*fswatch.Watcher
 	closed      map[string]bool
 	lastGitEmit map[string]time.Time
+	pendingEmit map[string]bool
 }
 
 // New wires the engines together. sink receives all backend→UI events.
@@ -132,7 +133,9 @@ func (a *App) forwardWatcher(projectID string, w *fswatch.Watcher) {
 			"path":      ev.Path,
 			"op":        ev.Op,
 		})
-		a.emitGitStatus(projectID)
+		// Off the watcher goroutine: git status on a slow repo must not
+		// stall fs.change forwarding.
+		go a.emitGitStatus(projectID)
 	}
 }
 
@@ -182,6 +185,8 @@ func (a *App) CloseWatcher(projectID string) {
 	w, ok := a.watchers[projectID]
 	delete(a.watchers, projectID)
 	a.closed[projectID] = true
+	delete(a.lastGitEmit, projectID)
+	delete(a.pendingEmit, projectID)
 	a.mu.Unlock()
 	if ok {
 		w.Close()
@@ -427,24 +432,61 @@ func (a *App) GitLog(projectID string, n int) ([]git.LogEntry, error) {
 	return e.Log(n)
 }
 
-// emitGitStatus computes Status for the project and emits git.status (throttled
-// per project) or git.error on any failure. It is a no-op for unknown projects.
+// emitGitStatus is the throttled entry point: it emits immediately when the
+// throttle window has elapsed; otherwise it arms (at most once) a trailing
+// timer for the remaining wait so the final state of a burst is never lost.
+// No-op for unknown projects.
 func (a *App) emitGitStatus(projectID string) {
-	root, err := a.resolveRoot(projectID)
-	if err != nil {
-		return
-	}
 	a.mu.Lock()
 	if a.lastGitEmit == nil {
 		a.lastGitEmit = map[string]time.Time{}
 	}
+	if a.pendingEmit == nil {
+		a.pendingEmit = map[string]bool{}
+	}
 	if time.Since(a.lastGitEmit[projectID]) < gitStatusThrottle {
+		if a.pendingEmit[projectID] {
+			// a trailing emit is already scheduled for this project
+			a.mu.Unlock()
+			return
+		}
+		a.pendingEmit[projectID] = true
+		wait := gitStatusThrottle - time.Since(a.lastGitEmit[projectID])
 		a.mu.Unlock()
+		time.AfterFunc(wait, func() { a.emitGitStatusNow(projectID) })
 		return
 	}
 	a.lastGitEmit[projectID] = time.Now()
 	a.mu.Unlock()
 
+	a.emitGitStatusNow(projectID)
+}
+
+// emitGitStatusNow performs the (unthrottled) status computation and emission;
+// it is called inline on the leading edge and from the trailing timer (which
+// passes the bypass implicitly by not going through emitGitStatus again).
+func (a *App) emitGitStatusNow(projectID string) {
+	a.mu.Lock()
+	if a.lastGitEmit == nil {
+		a.lastGitEmit = map[string]time.Time{}
+	}
+	if a.pendingEmit == nil {
+		a.pendingEmit = map[string]bool{}
+	}
+	if a.pendingEmit[projectID] {
+		a.lastGitEmit[projectID] = time.Now()
+	}
+	delete(a.pendingEmit, projectID)
+	a.mu.Unlock()
+
+	a.emitGitStatusBody(projectID)
+}
+
+func (a *App) emitGitStatusBody(projectID string) {
+	root, err := a.resolveRoot(projectID)
+	if err != nil {
+		return
+	}
 	e, gerr := git.New(root)
 	if gerr != nil {
 		a.sink.Emit(EventGitError, map[string]string{"projectId": projectID, "message": gerr.Error()})

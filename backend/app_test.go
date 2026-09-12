@@ -457,6 +457,108 @@ func TestEmitGitStatusPayloadAndThrottle(t *testing.T) {
 	}
 }
 
+func TestEmitGitStatus_TrailingEdge(t *testing.T) {
+	root := initRepoGit(t)
+	app, sink := newTestApp(t)
+	p, err := app.OpenProject(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid := p.ID
+
+	app.emitGitStatus(pid) // leading edge, emits
+	sink.waitFor(t, "git.status", 5*time.Second)
+
+	// burst: change + stage inside throttle window → only trailing emit
+	if err := os.WriteFile(filepath.Join(root, "init.txt"), []byte("two"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.GitStage(pid, []string{"init.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	app.emitGitStatus(pid) // inside window → arms trailing timer
+	app.emitGitStatus(pid) // pending already armed → ignored
+
+	// trailing emit must carry the final state (staged change) eventually
+	deadline := time.Now().Add(5 * time.Second)
+	n := 0
+	branch := ""
+	for time.Now().Before(deadline) {
+		n = 0
+		hasStaged := false
+		for _, ev := range sink.snapshot() {
+			if ev.name != "git.status" {
+				continue
+			}
+			n++
+			if payload, ok := ev.payload.(map[string]any); ok {
+				if st, ok := payload["status"].(git.Status); ok {
+					if len(st.Staged) == 1 && st.Staged[0].Path == "init.txt" && st.Branch != "" {
+						hasStaged = true
+						branch = st.Branch
+					}
+				}
+			}
+		}
+		if n >= 2 && hasStaged {
+			break
+		}
+		if n > 2 {
+			t.Fatalf("too many git.status events: %d", n)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if n < 2 {
+		t.Fatalf("trailing emit never arrived, got %d git.status events", n)
+	}
+	if branch != "master" {
+		t.Fatalf("final status missing/invalid")
+	}
+
+	// no further emissions once settle (no new events after trailing)
+	time.Sleep(gitStatusThrottle + 200*time.Millisecond)
+	if n := countEventsNamed(sink.snapshot(), "git.status"); n != 2 {
+		t.Fatalf("expected exactly 2 git.status events, got %d", n)
+	}
+}
+
+func countEventsNamed(events []fakeEvent, name string) int {
+	n := 0
+	for _, ev := range events {
+		if ev.name == name {
+			n++
+		}
+	}
+	return n
+}
+
+func TestCloseWatcher_ClearsThrottleState(t *testing.T) {
+	root := initRepoGit(t)
+	app, sink := newTestApp(t)
+	p, err := app.OpenProject(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.emitGitStatus(p.ID)
+	sink.waitFor(t, "git.status", 5*time.Second)
+	app.mu.Lock()
+	_, has := app.lastGitEmit[p.ID]
+	app.mu.Unlock()
+	if !has {
+		t.Fatal("expected throttle entry to exist before removal")
+	}
+	if err := app.RemoveProject(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	app.mu.Lock()
+	_, hasLast := app.lastGitEmit[p.ID]
+	_, hasPending := app.pendingEmit[p.ID]
+	app.mu.Unlock()
+	if hasLast || hasPending {
+		t.Fatal("expected throttle state deleted on project removal")
+	}
+}
+
 func TestEmitGitStatusErrorEvent(t *testing.T) {
 	// project root without a git dir → New fails → git.error
 	app, sink := newTestApp(t)

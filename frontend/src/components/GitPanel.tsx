@@ -72,7 +72,8 @@ const Section: React.FC<{
 
 const GitPanel: React.FC = () => {
   const { activeId } = useProjects()
-  const { status, errors, fetchDiff, stage, unstage, commit } = useGit()
+  const { status, errors, fetchDiff, stage, unstage, commit, setError } =
+    useGit()
   const { openDiffTab } = useTabs()
   const [branches, setBranches] = useState<string[] | null>(null)
   const [branchOpen, setBranchOpen] = useState(false)
@@ -150,7 +151,8 @@ const GitPanel: React.FC = () => {
                   setBranchOpen(false)
                   if (activeId && b !== st?.branch)
                     App.GitCheckout(activeId, b)
-                      .catch(() => {})
+                      .then(() => setError(activeId, ''))
+                      .catch((e) => setError(activeId, String(e)))
                       .finally(() => fetchBranchRefresh(activeId))
                 }}
               >
@@ -214,7 +216,11 @@ const GitPanel: React.FC = () => {
           disabled={staged.length === 0 || !message.trim() || !activeId}
           onClick={() => {
             if (!activeId) return
-            commit(activeId, message.trim()).then(() => setMessage(''))
+            // on failure the provider records the error and rejects; the
+            // message is only stripped on success so the user can retry.
+            commit(activeId, message.trim())
+              .then(() => setMessage(''))
+              .catch(() => {})
           }}
           className="no-drag self-end px-3 py-1 rounded bg-[var(--accent)] text-[#0b0c10] font-medium disabled:opacity-40 disabled:cursor-not-allowed"
         >

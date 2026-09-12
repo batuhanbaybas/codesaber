@@ -83,15 +83,16 @@ const DiffViewer: React.FC<{
   tab: Tab
   active: boolean
 }> = ({ projectId, tab, active }) => {
-  const { diffs, fetchDiff } = useGit()
+  const { diffs, diffVersion, fetchDiff } = useGit()
   const parsed = parseDiffTabPath(tab.path)
   const key = parsed ? diffKey(projectId, parsed.path, parsed.staged) : ''
   const patch = key ? diffs[key] : undefined
 
-  // (Re)fetch whenever the tab first renders; provider caches by key.
+  // (Re)fetch when the tab first renders or after cache invalidation; the
+  // provider caches by key and bumps diffVersion on invalidation.
   useEffect(() => {
     if (key && !diffs[key]) fetchDiff(key)
-  }, [key, diffs, fetchDiff])
+  }, [key, diffs, diffVersion, fetchDiff])
 
   const additions = patch?.hunks?.reduce((a, h) => a + h.additions, 0) ?? 0
   const deletions = patch?.hunks?.reduce((a, h) => a + h.deletions, 0) ?? 0
