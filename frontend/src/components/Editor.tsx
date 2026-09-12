@@ -17,6 +17,7 @@ import {
 } from '@codemirror/view'
 import { basicSetup } from 'codemirror'
 import { StreamLanguage } from '@codemirror/language'
+import { showMinimap } from '@replit/codemirror-minimap'
 import { javascript } from '@codemirror/lang-javascript'
 import { css } from '@codemirror/lang-css'
 import { html } from '@codemirror/lang-html'
@@ -90,6 +91,26 @@ const theme = EditorView.theme(
     '.cm-panels': {
       backgroundColor: 'var(--bg-panel)',
       color: 'var(--text-primary)',
+    },
+    '& .cm-minimap-gutter': {
+      backgroundColor: 'var(--bg-editor)',
+      borderLeft: '1px solid var(--bg-border)',
+      width: '62px !important',
+    },
+    '& .cm-minimap-inner': {
+      backgroundColor: 'var(--bg-editor)',
+    },
+    '& .cm-minimap-inner canvas': {
+      maxWidth: '60px !important',
+    },
+    '& .cm-minimap-overlay': {
+      background: '#aecbff',
+      opacity: 0.14,
+    },
+    '& .cm-minimap-overlay:hover, & .cm-minimap-overlay-active .cm-minimap-overlay':
+      { opacity: 0.24 },
+    '& .cm-minimap-box-shadow': {
+      boxShadow: 'none',
     },
   },
   { dark: true },
@@ -341,6 +362,14 @@ const TabEditor: React.FC<{
           theme,
           darkSyntax,
           lspTheme,
+          showMinimap.compute(['doc'], () => ({
+            create: (v: EditorView) => {
+              const dom = document.createElement('div')
+              return { dom }
+            },
+            displayText: 'characters',
+            showOverlay: 'always',
+          })),
           keymap.of([
             {
               key: 'Mod-s',
