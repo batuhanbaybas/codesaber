@@ -6,12 +6,13 @@ import Editor from '../components/Editor'
 import CommandPalette from '../components/CommandPalette'
 import QuickOpen from '../components/QuickOpen'
 import StatusBar from '../components/StatusBar'
+import ResizeHandle from '../components/ResizeHandle'
 import { ProjectsProvider } from '../state/projects'
 import { TabsProvider } from '../state/tabs'
-import { LayoutProvider, useLayout } from '../state/layout'
+import { LayoutProvider, useLayout, SIZE_LIMITS } from '../state/layout'
 
 const WorkspaceInner: React.FC = () => {
-  const { ui, toggle } = useLayout()
+  const { ui, toggle, setSize } = useLayout()
 
   // Window-level panel keybindings. Mod-P/Mod-Shift-P are owned by
   // QuickOpen/CommandPalette respectively; these only cover panels. The
@@ -73,17 +74,39 @@ const WorkspaceInner: React.FC = () => {
         </div>
         {/* Left sidebar */}
         <Sidebar />
+        {/* Resize handle between sidebar and editor area */}
+        {ui.sidebar && (
+          <ResizeHandle
+            axis="x"
+            onResize={(px) => setSize('sidebarWidth', px)}
+            onReset={() => setSize('sidebarWidth', SIZE_LIMITS.sidebarWidth.def)}
+            getCurrent={() => ui.sidebarWidth}
+          />
+        )}
         {/* Center editor area */}
         <div className="flex flex-col flex-1 min-w-0 bg-editor">
           <EditorTabs />
           <Editor />
         </div>
+        {/* Resize handle between editor area and right dock */}
+        {ui.rightDock && (
+          <ResizeHandle
+            axis="x"
+            onResize={(px) => setSize('rightDockWidth', px)}
+            onReset={() =>
+              setSize('rightDockWidth', SIZE_LIMITS.rightDockWidth.def)
+            }
+            getCurrent={() => ui.rightDockWidth}
+            flip
+          />
+        )}
         {/* Right dock */}
         <div
           className={
             'collapsible shrink-0 bg-panel border-l border-panel h-full flex flex-col ' +
-            (ui.rightDock ? 'w-64' : 'collapsed')
+            (ui.rightDock ? '' : 'collapsed')
           }
+          style={{ width: ui.rightDock ? ui.rightDockWidth : undefined }}
         >
           <div className="flex items-center border-b border-panel text-xs">
             <div className="px-3 py-2 border-l-2 border-transparent text-dim">Agent</div>
@@ -107,9 +130,22 @@ const WorkspaceInner: React.FC = () => {
       <QuickOpen />
       {/* Bottom strip: terminal placeholder */}
       {ui.terminal && (
-        <div className="h-40 shrink-0 bg-panel border-t border-panel px-3 py-2 text-xs text-dim">
-          Terminal
-        </div>
+        <>
+          <ResizeHandle
+            axis="y"
+            onResize={(px) => setSize('terminalHeight', px)}
+            onReset={() =>
+              setSize('terminalHeight', SIZE_LIMITS.terminalHeight.def)
+            }
+            getCurrent={() => ui.terminalHeight}
+          />
+          <div
+            className="collapsible shrink-0 bg-panel border-t border-panel px-3 py-2 text-xs text-dim"
+            style={{ height: ui.terminalHeight }}
+          >
+            Terminal
+          </div>
+        </>
       )}
     </div>
   )

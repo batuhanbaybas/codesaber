@@ -11,8 +11,9 @@ const Sidebar: React.FC = () => {
     <div
       className={
         'collapsible relative shrink-0 border-r border-panel bg-panel h-full flex flex-col text-xs ' +
-        (ui.sidebar ? 'w-60' : 'collapsed')
+        (ui.sidebar ? '' : 'collapsed')
       }
+      style={{ width: ui.sidebar ? ui.sidebarWidth : undefined }}
     >
       <button
         onClick={() => toggle('sidebar')}

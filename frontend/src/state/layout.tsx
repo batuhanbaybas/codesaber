@@ -14,9 +14,27 @@ export interface LayoutUI {
   sidebar: boolean
   rightDock: boolean
   terminal: boolean
+  sidebarWidth: number
+  rightDockWidth: number
+  terminalHeight: number
 }
 
-const defaults: LayoutUI = { sidebar: true, rightDock: true, terminal: true }
+export type SizeKey = 'sidebarWidth' | 'rightDockWidth' | 'terminalHeight'
+
+export const SIZE_LIMITS: Record<SizeKey, { min: number; max: number; def: number }> = {
+  sidebarWidth: { min: 180, max: 500, def: 240 },
+  rightDockWidth: { min: 260, max: 700, def: 360 },
+  terminalHeight: { min: 120, max: 600, def: 200 },
+}
+
+const defaults: LayoutUI = {
+  sidebar: true,
+  rightDock: true,
+  terminal: true,
+  sidebarWidth: SIZE_LIMITS.sidebarWidth.def,
+  rightDockWidth: SIZE_LIMITS.rightDockWidth.def,
+  terminalHeight: SIZE_LIMITS.terminalHeight.def,
+}
 
 const storageKey = `aide.layout:${role}`
 
@@ -33,7 +51,8 @@ const load = (): LayoutUI => {
 
 interface LayoutContextValue {
   ui: LayoutUI
-  toggle: (key: keyof LayoutUI) => void
+  toggle: (key: 'sidebar' | 'rightDock' | 'terminal') => void
+  setSize: (key: SizeKey, px: number) => void
 }
 
 const LayoutContext = createContext<LayoutContextValue | null>(null)
@@ -51,12 +70,22 @@ export const LayoutProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, [ui])
 
-  const toggle = useCallback((key: keyof LayoutUI) => {
+  const toggle = useCallback((key: 'sidebar' | 'rightDock' | 'terminal') => {
     setUI((prev) => ({ ...prev, [key]: !prev[key] }))
   }, [])
 
+  const setSize = useCallback((key: SizeKey, px: number) => {
+    const { min, max } = SIZE_LIMITS[key]
+    // Keep panels usable when the window is small: never let a panel eat
+    // more than half the viewport along its axis.
+    const viewportCap =
+      key === 'terminalHeight' ? window.innerHeight / 2 : window.innerWidth / 2
+    const clamped = Math.max(min, Math.min(max, viewportCap, px))
+    setUI((prev) => (prev[key] === clamped ? prev : { ...prev, [key]: clamped }))
+  }, [])
+
   return (
-    <LayoutContext.Provider value={{ ui, toggle }}>
+    <LayoutContext.Provider value={{ ui, toggle, setSize }}>
       {children}
     </LayoutContext.Provider>
   )

@@ -44,7 +44,7 @@ body {
 }
 
 .collapsible {
-  transition: width 180ms ease;
+  transition: width 180ms ease, height 180ms ease;
   overflow: hidden;
 }
 .collapsible.collapsed {
@@ -52,3 +52,15 @@ body {
   min-width: 0;
   border-color: transparent;
 }
+
+body[data-resizing="1"] .collapsible { transition: none }
+
+/* 4px resize gutters between panels */
+.col-resize { cursor: col-resize; }
+.row-resize { cursor: row-resize; }
+.col-resize:hover, .col-resize:active,
+.row-resize:hover, .row-resize:active {
+  background-color: var(--accent, #2d6ee2);
+}
+body[data-resizing="1"] { user-select: none; }
+
