@@ -17,6 +17,8 @@ import (
 	"aide/backend/fswatch"
 	"aide/backend/git"
 	"aide/backend/project"
+
+	"aide/backend/agentstore"
 )
 
 // maxTreeDepth limits ListTree recursion (root children = depth 1).
@@ -64,11 +66,13 @@ type App struct {
 	reg         *project.Registry
 	store       *project.Store
 	buf         *editor.Service
+	chats       *agentstore.Store
 	mu          sync.Mutex
 	watchers    map[string]*fswatch.Watcher
 	closed      map[string]bool
 	lastGitEmit map[string]time.Time
 	pendingEmit map[string]bool
+	agents      map[string]*agentSession
 }
 
 // New wires the engines together. sink receives all backend→UI events.
@@ -83,8 +87,10 @@ func NewWith(sink adapter.EventSink, storePath string) *App {
 		reg:      project.NewRegistry(func() {}),
 		store:    project.NewStore(storePath),
 		buf:      editor.New(),
+		chats:    agentstore.NewStore(),
 		watchers: map[string]*fswatch.Watcher{},
 		closed:   map[string]bool{},
+		agents:   map[string]*agentSession{},
 	}
 }
 
@@ -171,6 +177,7 @@ func (a *App) RemoveProject(id string) error {
 		return err
 	}
 	a.CloseWatcher(id)
+	_ = a.ACPStop(id)
 	a.sink.Emit(project.EventRemoved, map[string]any{"id": id, "root": p.Root})
 	if len(a.reg.List()) == 0 {
 		adapter.ShowWelcomeWindow()

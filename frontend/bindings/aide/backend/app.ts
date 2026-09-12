@@ -13,6 +13,12 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as acp$0 from "./acp/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as agentstore$0 from "./agentstore/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as git$0 from "./git/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -21,6 +27,65 @@ import * as project$0 from "./project/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
+
+/**
+ * ACPHarnesses lists known agent profiles with PATH availability.
+ */
+export function ACPHarnesses(): $CancellablePromise<acp$0.Info[] | null> {
+    return $Call.ByID(334792292);
+}
+
+/**
+ * ACPLoadTranscript returns the persisted chat entries for the project (used
+ * by the Agent panel on mount).
+ */
+export function ACPLoadTranscript(projectID: string): $CancellablePromise<agentstore$0.Entry[] | null> {
+    return $Call.ByID(3899692018, projectID);
+}
+
+/**
+ * ACPNewSession closes the current harness connection and spawns a fresh
+ * session with the same harness. The transcript is kept; a divider note entry
+ * marks the boundary.
+ */
+export function ACPNewSession(projectID: string): $CancellablePromise<void> {
+    return $Call.ByID(1433866094, projectID);
+}
+
+/**
+ * ACPRespondPermission resolves a pending permission request: optionId picks
+ * one of the offered options; cancel=true answers {"outcome":"cancelled"}.
+ */
+export function ACPRespondPermission(projectID: string, requestID: string, optionID: string, cancel: boolean): $CancellablePromise<void> {
+    return $Call.ByID(2524187014, projectID, requestID, optionID, cancel);
+}
+
+/**
+ * ACPSendPrompt runs one synchronous prompt turn: the user entry is persisted
+ * and emitted up front, session/update notifications stream out as acp.msg /
+ * acp.tool events while the turn is open, and the assembled agent reply is
+ * persisted once the turn completes.
+ */
+export function ACPSendPrompt(projectID: string, text: string): $CancellablePromise<void> {
+    return $Call.ByID(1900935072, projectID, text);
+}
+
+/**
+ * ACPStart resolves the harness profile and spawns one ACP session for the
+ * project (one session/connection MVP). After start the persisted transcript
+ * is emitted (acp.transcript) followed by an idle state.
+ */
+export function ACPStart(projectID: string, harnessName: string): $CancellablePromise<void> {
+    return $Call.ByID(2977661344, projectID, harnessName);
+}
+
+/**
+ * ACPStop closes the harness connection (terminating the child process) and
+ * reports harness-down.
+ */
+export function ACPStop(projectID: string): $CancellablePromise<void> {
+    return $Call.ByID(1604775396, projectID);
+}
 
 /**
  * CloseWatcher stops and releases the watcher for projectID and marks the

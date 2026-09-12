@@ -1,0 +1,277 @@
+import React, { useEffect, useRef, useState } from 'react'
+import { useProjects } from '../state/projects'
+import {
+  useAgent,
+  type ChatMessage,
+  type ToolCard,
+} from '../state/agent'
+
+const statusDot = (status: string) => {
+  if (status === 'in_progress' || status === 'pending')
+    return 'bg-[#e6c07b] animate-pulse'
+  if (status === 'completed') return 'bg-[#7dcf9e]'
+  if (status === 'failed') return 'bg-[#e5735f]'
+  return 'bg-gray-500'
+}
+
+const ToolRow: React.FC<{ t: ToolCard }> = ({ t }) => (
+  <div className="px-3 py-1">
+    <div className="flex items-center gap-2 text-[11px] text-dim">
+      <span>{'\u{1F4BF}'}</span>
+      <span className={'w-1.5 h-1.5 rounded-full shrink-0 ' + statusDot(t.status)} />
+      <span className="truncate" title={t.title}>
+        {t.title || t.toolCallId}
+      </span>
+      <span className="ml-auto text-[10px] shrink-0">{t.status}</span>
+    </div>
+    {t.content && (
+      <pre className="mt-1 ml-5 px-2 py-1 rounded bg-[#1e1f22] text-[10px] text-dim whitespace-pre-wrap break-words max-h-32 overflow-y-auto">
+        {t.content}
+      </pre>
+    )}
+  </div>
+)
+
+const Message: React.FC<{ m: ChatMessage }> = ({ m }) => {
+  if (m.role === 'user') {
+    return (
+      <div className="flex justify-end px-3 py-1">
+        <div className="max-w-[85%] rounded bg-[var(--accent)]/15 text-primary text-xs px-2.5 py-1.5 whitespace-pre-wrap break-words">
+          {m.text}
+        </div>
+      </div>
+    )
+  }
+  if (m.role === 'system') {
+    return (
+      <div className="px-3 py-1 text-center text-[10px] text-dim">
+        <span className="px-2 py-0.5 rounded bg-[#1e1f22]">{m.text}</span>
+      </div>
+    )
+  }
+  return (
+    <div className="px-3 py-1">
+      <div
+        className={
+          'text-xs whitespace-pre-wrap break-words ' +
+          (m.kind === 'error' ? 'text-[#e5735f]' : 'text-dim')
+        }
+      >
+        {m.text}
+      </div>
+    </div>
+  )
+}
+
+const AgentPanel: React.FC = () => {
+  const { activeId } = useProjects()
+  const { state, harnesses, send, start, stop, newSession, respondPermission } =
+    useAgent()
+  const [draft, setDraft] = useState('')
+  const listRef = useRef<HTMLDivElement | null>(null)
+  const taRef = useRef<HTMLTextAreaElement | null>(null)
+
+  const st = activeId ? state[activeId] : undefined
+  const running = !!st?.harness && st.status !== 'harness-down' && st.status !== 'no-harness'
+  const thinking = st?.status === 'thinking'
+  const pending = st?.pendingPermission ?? null
+
+  // Keep the chat pinned to the newest content.
+  useEffect(() => {
+    const el = listRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [st?.messages.length, st?.tools.length, st?.messages])
+
+  const grow = () => {
+    const ta = taRef.current
+    if (!ta) return
+    ta.style.height = 'auto'
+    ta.style.height = Math.min(ta.scrollHeight, 140) + 'px'
+  }
+
+  const doSend = () => {
+    const text = draft.trim()
+    if (!text || !activeId || thinking || !running) return
+    setDraft('')
+    requestAnimationFrame(grow)
+    void send(activeId, text)
+  }
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      doSend()
+    }
+  }
+
+  if (!activeId) {
+    return (
+      <div className="flex flex-col h-full items-center justify-center text-xs text-dim">
+        No project open
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col h-full text-xs">
+      {/* Harness bar */}
+      <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 border-b border-panel">
+        {running ? (
+          <>
+            <span className="px-2 py-0.5 rounded bg-[#1e1f22] text-dim">
+              {'\u25CF'} {st?.harness}
+            </span>
+            <button
+              className="no-drag px-2 py-0.5 rounded bg-[#1e1f22] text-dim hover:text-primary"
+              onClick={() => void stop(activeId)}
+            >
+              Stop
+            </button>
+          </>
+        ) : (
+          <HarnessPicker
+            harnesses={harnesses}
+            onStart={(name) => void start(activeId, name)}
+          />
+        )}
+      </div>
+
+      {/* Status strip */}
+      {(st?.status === 'harness-down' || thinking) && (
+        <div
+          className={
+            'shrink-0 px-3 py-1 text-[11px] ' +
+            (thinking
+              ? 'text-dim'
+              : 'bg-[#5a1d1d] text-[#ff9999] border-b border-[#ff6b6b]/30')
+          }
+        >
+          {thinking ? 'thinking\u2026' : 'harness down — start a harness to chat'}
+        </div>
+      )}
+
+      {/* Chat list */}
+      <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto py-1">
+        {(st?.messages ?? []).map((m) => (
+          <Message key={m.id} m={m} />
+        ))}
+        {(st?.tools ?? []).map((t) => (
+          <ToolRow key={t.toolCallId} t={t} />
+        ))}
+      </div>
+
+      {/* Permission card */}
+      {pending && (
+        <div className="shrink-0 mx-2 mb-1 rounded border border-[#e6c07b]/40 bg-[#1e1f22] p-2">
+          <div className="text-[11px] text-[#e6c07b] mb-1">
+            Permission requested
+          </div>
+          {pending.options.length === 0 ? (
+            <div className="text-dim">(no options offered)</div>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {pending.options.map((o) => (
+                <button
+                  key={o.optionId ?? o.name}
+                  className="text-left px-2 py-1 rounded bg-[#2a2c31] hover:bg-[#373940]"
+                  onClick={() =>
+                    void respondPermission(
+                      activeId,
+                      pending.requestId,
+                      o.optionId ?? '',
+                      false,
+                    )
+                  }
+                >
+                  <span className="text-primary">{o.name ?? o.optionId}</span>
+                  {o.description && (
+                    <span className="text-dim"> — {o.description}</span>
+                  )}
+                </button>
+              ))}
+              <button
+                className="text-left px-2 py-1 rounded text-[#e5735f] hover:bg-[#2a2c31]"
+                onClick={() =>
+                  void respondPermission(activeId, pending.requestId, '', true)
+                }
+              >
+                Reject
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Composer */}
+      <div className="shrink-0 border-t border-panel p-2 flex flex-col gap-1.5">
+        <textarea
+          ref={taRef}
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value)
+            grow()
+          }}
+          onKeyDown={onKeyDown}
+          placeholder={running ? 'Ask the agent…' : 'Start a harness first'}
+          disabled={!running || thinking}
+          rows={1}
+          className="no-drag w-full resize-none rounded bg-[#1e1f22] px-2 py-1 text-primary outline-none focus:ring-1 focus:ring-[var(--accent)] disabled:opacity-40"
+        />
+        <div className="flex items-center">
+          <button
+            className="no-drag px-2 py-0.5 rounded bg-[#1e1f22] text-dim hover:text-primary disabled:opacity-40"
+            disabled={!running}
+            title="Start a fresh session (transcript is kept)"
+            onClick={() => void newSession(activeId)}
+          >
+            New Session
+          </button>
+          <button
+            className="no-drag ml-auto px-3 py-1 rounded bg-[var(--accent)] text-[#0b0c10] font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+            disabled={!draft.trim() || thinking || !running}
+            onClick={doSend}
+          >
+            Send
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const HarnessPicker: React.FC<{
+  harnesses: { name: string; available: boolean }[]
+  onStart: (name: string) => void
+}> = ({ harnesses, onStart }) => {
+  const [selected, setSelected] = useState('')
+  const options = harnesses.length
+    ? harnesses
+    : [{ name: 'opencode', available: true }]
+  const current = selected || options[0]?.name || ''
+  const currentInfo = options.find((h) => h.name === current)
+  return (
+    <>
+      <select
+        className="no-drag px-2 py-0.5 rounded bg-[#1e1f22] text-primary outline-none"
+        value={current}
+        onChange={(e) => setSelected(e.target.value)}
+      >
+        {options.map((h) => (
+          <option key={h.name} value={h.name} disabled={!h.available}>
+            {h.name}
+            {h.available ? '' : ' (not installed)'}
+          </option>
+        ))}
+      </select>
+      <button
+        className="no-drag px-3 py-0.5 rounded bg-[var(--accent)] text-[#0b0c10] font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+        disabled={!currentInfo?.available}
+        onClick={() => onStart(current)}
+      >
+        Start
+      </button>
+    </>
+  )
+}
+
+export default AgentPanel
