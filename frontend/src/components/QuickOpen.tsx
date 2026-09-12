@@ -77,6 +77,17 @@ const QuickOpen: React.FC = () => {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // 'aide:quickopen' (activity rail) opens the palette too. Same priority
+  // rule as Mod-P: never stack on top of the command palette.
+  useEffect(() => {
+    const onOpen = () => {
+      if (document.querySelector('[data-command-palette]')) return
+      setOpenState(true)
+    }
+    window.addEventListener('aide:quickopen', onOpen)
+    return () => window.removeEventListener('aide:quickopen', onOpen)
+  }, [])
+
   useEffect(() => {
     if (openState) inputRef.current?.focus()
   }, [openState])

@@ -10,12 +10,13 @@ import ResizeHandle from '../components/ResizeHandle'
 import AgentPanel from '../components/AgentPanel'
 import { ProjectsProvider, useProjects } from '../state/projects'
 import { TabsProvider } from '../state/tabs'
-import { GitProvider } from '../state/git'
+import { GitProvider, useGit } from '../state/git'
 import { AgentProvider } from '../state/agent'
 import {
   LayoutProvider,
   useLayout,
   SIZE_LIMITS,
+  type LayoutUI,
 } from '../state/layout'
 import { TerminalProvider, useTerminal } from '../state/terminal'
 import GitPanel from '../components/GitPanel'
@@ -84,9 +85,164 @@ const TerminalStrip: React.FC = () => {
   )
 }
 
+const railBtn = (active: boolean) =>
+  'no-drag relative w-7 h-7 rounded-md flex items-center justify-center ' +
+  (active
+    ? 'text-primary bg-white/10 after:absolute after:left-[-6px] after:top-1 after:bottom-1 after:w-0.5 after:bg-[var(--accent)] after:rounded-full'
+    : 'text-dim hover:text-primary hover:bg-white/8')
+
+type Icon = (props: React.SVGProps<SVGSVGElement>) => React.ReactElement
+
+const iconProps = {
+  width: 17,
+  height: 17,
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.6,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+}
+
+const FilesIcon: Icon = (props) => (
+  <svg {...iconProps} {...props}>
+    <rect x="8" y="3" width="13" height="13" rx="2" />
+    <rect x="3" y="8" width="13" height="13" rx="2" />
+  </svg>
+)
+
+const SearchIcon: Icon = (props) => (
+  <svg {...iconProps} {...props}>
+    <circle cx="11" cy="11" r="6.5" />
+    <path d="M20 20l-3.8-3.8" />
+  </svg>
+)
+
+const BranchIcon: Icon = (props) => (
+  <svg {...iconProps} {...props}>
+    <circle cx="6" cy="6" r="2.4" />
+    <circle cx="6" cy="18" r="2.4" />
+    <circle cx="18" cy="8" r="2.4" />
+    <path d="M6 8.4v7.2" />
+    <path d="M18 10.4c0 3.4-2.8 4.4-6.2 4.6" />
+  </svg>
+)
+
+const TerminalIcon: Icon = (props) => (
+  <svg {...iconProps} {...props}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M10 8.5l4 3.5-4 3.5" />
+  </svg>
+)
+
+const GearIcon: Icon = (props) => (
+  <svg {...iconProps} {...props}>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7" />
+  </svg>
+)
+
+const GridIcon: Icon = (props) => (
+  <svg {...iconProps} {...props} fill="currentColor" stroke="none">
+    {[6, 12, 18].flatMap((y) =>
+      [6, 12, 18].map((x) => <circle key={`${x}-${y}`} cx={x} cy={y} r="1.6" />),
+    )}
+  </svg>
+)
+
+const ActivityRail: React.FC<{
+  ui: LayoutUI
+  dockTab: 'agent' | 'git'
+  onToggle: (key: 'sidebar' | 'rightDock' | 'terminal') => void
+}> = ({ ui, dockTab, onToggle }) => {
+  const { activeId } = useProjects()
+  const { status } = useGit()
+  const st = activeId ? status[activeId] : undefined
+  const changed = st
+    ? (st.staged?.length ?? 0) +
+      (st.unstaged?.length ?? 0) +
+      (st.untracked?.length ?? 0)
+    : 0
+
+  const openGitDock = () => {
+    window.dispatchEvent(
+      new CustomEvent('aide:set-dock-tab', { detail: { tab: 'git' } }),
+    )
+    if (!ui.rightDock) onToggle('rightDock')
+  }
+
+  const disabled = (label: string) => (
+    <button
+      className="no-drag w-7 h-7 rounded-md flex items-center justify-center text-dim/60 cursor-default"
+      title={label}
+      aria-label={label}
+      disabled
+    >
+      {label === 'Settings — coming soon' ? <GearIcon /> : <GridIcon />}
+    </button>
+  )
+
+  return (
+    <div className="flex flex-col items-center gap-1.5 py-2 bg-panel w-11 shrink-0 border-r border-panel">
+      <button
+        className={railBtn(ui.sidebar)}
+        title="Files ⌘B"
+        aria-label="Toggle files sidebar"
+        onClick={() => onToggle('sidebar')}
+      >
+        <FilesIcon />
+      </button>
+      <button
+        className={railBtn(false)}
+        title="Search ⌘P"
+        aria-label="Open quick open"
+        onClick={() => window.dispatchEvent(new Event('aide:quickopen'))}
+      >
+        <SearchIcon />
+      </button>
+      <button
+        className={railBtn(ui.rightDock && dockTab === 'git')}
+        title="Source Control ⌘D"
+        aria-label="Toggle git dock"
+        onClick={openGitDock}
+      >
+        <BranchIcon />
+        {changed > 0 && (
+          <span className="absolute -top-0.5 -right-1 rounded-full bg-[#3b5bfd] text-[9px] text-white px-1 h-3.5 min-w-3.5 flex items-center justify-center font-medium">
+            {changed > 99 ? '99+' : changed}
+          </span>
+        )}
+      </button>
+      <button
+        className={railBtn(ui.terminal)}
+        title="Terminal ⌘J"
+        aria-label="Toggle terminal"
+        onClick={() => onToggle('terminal')}
+      >
+        <TerminalIcon />
+      </button>
+      <div className="mt-auto flex flex-col items-center gap-1.5">
+        {disabled('Settings — coming soon')}
+        {disabled('Extensions — coming soon')}
+      </div>
+    </div>
+  )
+}
+
 const WorkspaceInner: React.FC = () => {
   const { ui, toggle, setSize } = useLayout()
   const [dockTab, setDockTab] = useState<'agent' | 'git'>('git')
+
+  // Rail → dock tab coordination: the rail can force the dock onto a tab
+  // (git badge click) without lifting tab state into the layout provider.
+  useEffect(() => {
+    const onTab = (e: Event) => {
+      const tab = (e as CustomEvent<{ tab?: string }>).detail?.tab
+      if (tab === 'agent' || tab === 'git') setDockTab(tab)
+    }
+    window.addEventListener('aide:set-dock-tab', onTab)
+    return () => window.removeEventListener('aide:set-dock-tab', onTab)
+  }, [])
 
   // Window-level panel keybindings. Mod-P/Mod-Shift-P are owned by
   // QuickOpen/CommandPalette respectively; these only cover panels. The
@@ -111,41 +267,12 @@ const WorkspaceInner: React.FC = () => {
     return () => window.removeEventListener('keydown', onKey)
   }, [toggle])
 
-  const railBtn = (active: boolean) =>
-    'no-drag w-8 h-8 rounded flex items-center justify-center text-sm ' +
-    (active ? 'text-primary bg-[#1e1f22]' : 'text-dim hover:text-primary')
-
   return (
     <div className="flex flex-col h-full bg-editor text-primary">
       <Titlebar />
       <div className="flex flex-1 min-h-0">
         {/* Activity rail */}
-        <div className="flex flex-col items-center gap-1 py-2 bg-panel w-10 shrink-0 border-r border-panel">
-          <button
-            className={railBtn(ui.sidebar)}
-            title="Toggle sidebar (⌘B)"
-            aria-label="Toggle sidebar"
-            onClick={() => toggle('sidebar')}
-          >
-            {'\u2B1F'}
-          </button>
-          <button
-            className={railBtn(!ui.rightDock)}
-            title="Toggle right dock (⌘D)"
-            aria-label="Toggle right dock"
-            onClick={() => toggle('rightDock')}
-          >
-            {'\u25A7'}
-          </button>
-          <button
-            className={railBtn(ui.terminal)}
-            title="Toggle terminal (⌘J)"
-            aria-label="Toggle terminal"
-            onClick={() => toggle('terminal')}
-          >
-            {'\u25BF'}
-          </button>
-        </div>
+        <ActivityRail ui={ui} dockTab={dockTab} onToggle={toggle} />
         {/* Left sidebar */}
         <Sidebar />
         {/* Resize handle between sidebar and editor area */}
