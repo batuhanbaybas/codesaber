@@ -43,11 +43,11 @@ Legend: ✅ done · 🚧 in progress · ⬜ todo · 📌 deferred (was requested
 - ✅ Go-to-definition, hover, diagnostics gutter, document symbols
 - 📌 Config entries for future TS/Rust/Java servers (framework ready, Phase 6)
 
-## Phase 5 — Real Terminal ⬜
+## Phase 5 — Real Terminal ✅ (2026-09-12)
 
-- ⬜ creack/pty sessions per tab, cwd = project root
-- ⬜ xterm.js frontend, streaming over ⌘P-style event channel, resize propagation
-- ⬜ Multiple tabs
+- ✅ creack/pty sessions per tab, cwd = project root
+- ✅ xterm.js frontend, streaming over ⌘P-style event channel, resize propagation
+- ✅ Multiple tabs
 
 ## Phase 6 — Polish ⬜
 
