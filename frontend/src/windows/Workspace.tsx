@@ -21,6 +21,7 @@ import {
 } from '../state/layout'
 import { TerminalProvider, useTerminal } from '../state/terminal'
 import GitPanel from '../components/GitPanel'
+import SearchPanel from '../components/SearchPanel'
 import TerminalPanel from '../components/TerminalPanel'
 
 const TerminalStrip: React.FC = () => {
@@ -163,7 +164,7 @@ const GridIcon: Icon = (props) => (
 
 const ActivityRail: React.FC<{
   ui: LayoutUI
-  dockTab: 'agent' | 'git'
+  dockTab: 'search' | 'agent' | 'git'
   onToggle: (key: 'sidebar' | 'rightDock' | 'terminal') => void
 }> = ({ ui, dockTab, onToggle }) => {
   const { activeId } = useProjects()
@@ -175,9 +176,9 @@ const ActivityRail: React.FC<{
       (st.untracked?.length ?? 0)
     : 0
 
-  const openGitDock = () => {
+  const openDockTab = (tab: 'search' | 'git') => {
     window.dispatchEvent(
-      new CustomEvent('aide:set-dock-tab', { detail: { tab: 'git' } }),
+      new CustomEvent('aide:set-dock-tab', { detail: { tab } }),
     )
     if (!ui.rightDock) onToggle('rightDock')
   }
@@ -204,10 +205,10 @@ const ActivityRail: React.FC<{
         <FilesIcon />
       </button>
       <button
-        className={railBtn(false)}
-        title="Search ⌘P"
-        aria-label="Open quick open"
-        onClick={() => window.dispatchEvent(new Event('aide:quickopen'))}
+        className={railBtn(ui.rightDock && dockTab === 'search')}
+        title="Search ⌘⇧F"
+        aria-label="Open search dock"
+        onClick={() => openDockTab('search')}
       >
         <SearchIcon />
       </button>
@@ -215,7 +216,7 @@ const ActivityRail: React.FC<{
         className={railBtn(ui.rightDock && dockTab === 'git')}
         title="Source Control ⌘D"
         aria-label="Toggle git dock"
-        onClick={openGitDock}
+        onClick={() => openDockTab('git')}
       >
         <BranchIcon />
         {changed > 0 && (
@@ -242,7 +243,7 @@ const ActivityRail: React.FC<{
 
 const WorkspaceInner: React.FC = () => {
   const { ui, toggle, setSize } = useLayout()
-  const [dockTab, setDockTab] = useState<'agent' | 'git'>('git')
+  const [dockTab, setDockTab] = useState<'search' | 'agent' | 'git'>('git')
   const { activeId } = useProjects()
   const { status } = useGit()
   const st = activeId ? status[activeId] : undefined
@@ -253,11 +254,12 @@ const WorkspaceInner: React.FC = () => {
     : 0
 
   // Rail → dock tab coordination: the rail can force the dock onto a tab
-  // (git badge click) without lifting tab state into the layout provider.
+  // (search / git badge click) without lifting tab state into the layout
+  // provider.
   useEffect(() => {
     const onTab = (e: Event) => {
       const tab = (e as CustomEvent<{ tab?: string }>).detail?.tab
-      if (tab === 'agent' || tab === 'git') setDockTab(tab)
+      if (tab === 'search' || tab === 'agent' || tab === 'git') setDockTab(tab)
     }
     window.addEventListener('aide:set-dock-tab', onTab)
     return () => window.removeEventListener('aide:set-dock-tab', onTab)
@@ -269,22 +271,37 @@ const WorkspaceInner: React.FC = () => {
   // enough because CodeMirror only swallows keys it binds (Mod-B/J aren't).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.shiftKey) return
-      const k = e.key.toLowerCase()
-      if (k === 'b') {
-        e.preventDefault()
-        toggle('sidebar')
-      } else if (k === 'j') {
-        e.preventDefault()
-        toggle('terminal')
-      } else if (k === 'd') {
-        e.preventDefault()
-        toggle('rightDock')
+      if (e.metaKey || e.ctrlKey) {
+        const k = e.key.toLowerCase()
+        if (e.shiftKey) {
+          if (k === 'f') {
+            e.preventDefault()
+            // Open the dock on the Search tab and focus its input.
+            if (!ui.rightDock) toggle('rightDock')
+            window.dispatchEvent(
+              new CustomEvent('aide:set-dock-tab', {
+                detail: { tab: 'search' },
+              }),
+            )
+            window.dispatchEvent(new Event('aide:search-focus'))
+          }
+          return
+        }
+        if (k === 'b') {
+          e.preventDefault()
+          toggle('sidebar')
+        } else if (k === 'j') {
+          e.preventDefault()
+          toggle('terminal')
+        } else if (k === 'd') {
+          e.preventDefault()
+          toggle('rightDock')
+        }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [toggle])
+  }, [toggle, ui.rightDock])
 
   return (
     <div className="flex flex-col h-full bg-editor text-primary">
@@ -332,6 +349,18 @@ const WorkspaceInner: React.FC = () => {
             <button
               className={
                 'relative flex items-center gap-1.5 px-3 py-2 ' +
+                (dockTab === 'search'
+                  ? 'text-primary after:absolute after:left-2 after:right-2 after:bottom-0 after:h-[2px] after:bg-[var(--accent)] after:rounded-t'
+                  : 'text-dim hover:text-primary')
+              }
+              onClick={() => setDockTab('search')}
+            >
+              <SearchIcon />
+              Search
+            </button>
+            <button
+              className={
+                'relative flex items-center gap-1.5 px-3 py-2 ' +
                 (dockTab === 'agent'
                   ? 'text-primary after:absolute after:left-2 after:right-2 after:bottom-0 after:h-[2px] after:bg-[var(--accent)] after:rounded-t'
                   : 'text-dim hover:text-primary')
@@ -368,7 +397,13 @@ const WorkspaceInner: React.FC = () => {
             </button>
           </div>
           <div className="flex-1 min-h-0 flex flex-col">
-            {dockTab === 'agent' ? <AgentPanel /> : <GitPanel />}
+            {dockTab === 'search' ? (
+              <SearchPanel />
+            ) : dockTab === 'agent' ? (
+              <AgentPanel />
+            ) : (
+              <GitPanel />
+            )}
           </div>
         </div>
       </div>

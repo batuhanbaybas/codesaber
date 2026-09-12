@@ -26,6 +26,9 @@ import * as lsp$0 from "./lsp/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as project$0 from "./project/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as search$0 from "./search/models.js";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -349,6 +352,15 @@ export function RemoveProject(id: string): $CancellablePromise<void> {
  */
 export function SaveFile(path: string, content: string): $CancellablePromise<void> {
     return $Call.ByID(3028267559, path, content);
+}
+
+/**
+ * SearchText runs a project-wide text search and returns the full result
+ * synchronously (MVP: no streaming; a new call for the same project cancels
+ * the previous one, and the frontend drops superseded responses by seq).
+ */
+export function SearchText(projectID: string, term: string, regex: boolean): $CancellablePromise<search$0.Result> {
+    return $Call.ByID(1393198271, projectID, term, regex);
 }
 
 /**
