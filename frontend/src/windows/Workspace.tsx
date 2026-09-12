@@ -133,6 +133,7 @@ const WorkspaceInner: React.FC = () => {
         <>
           <ResizeHandle
             axis="y"
+            flip
             onResize={(px) => setSize('terminalHeight', px)}
             onReset={() =>
               setSize('terminalHeight', SIZE_LIMITS.terminalHeight.def)
