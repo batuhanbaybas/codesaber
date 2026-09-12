@@ -96,6 +96,12 @@ func (a *App) forwardWatcher(projectID string, w *fswatch.Watcher) {
 	}
 }
 
+// PickFolder opens a native folder-picker and returns the chosen absolute
+// path, or an empty string if the user cancelled the dialog.
+func (a *App) PickFolder() (string, error) {
+	return adapter.PickFolder("Choose Project Folder")
+}
+
 // ListProjects returns currently open projects, most recently used first.
 func (a *App) ListProjects() []project.Project {
 	return a.reg.List()

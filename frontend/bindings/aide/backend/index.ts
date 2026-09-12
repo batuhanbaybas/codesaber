@@ -6,6 +6,6 @@ export {
     App
 };
 
-export {
+export type {
     Entry
 } from "./models.js";

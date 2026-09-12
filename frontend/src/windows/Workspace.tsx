@@ -4,12 +4,14 @@ import Sidebar from '../components/Sidebar'
 import EditorTabs from '../components/EditorTabs'
 import Editor from '../components/Editor'
 import StatusBar from '../components/StatusBar'
+import { ProjectsProvider } from '../state/projects'
 
 const activityIcons = ['\u2318', '\u2192', '\u25a1', '\u21bb', '\u2699', '\u25be']
 
 const Workspace: React.FC = () => {
   return (
-    <div className="flex flex-col h-full bg-editor text-primary">
+    <ProjectsProvider>
+      <div className="flex flex-col h-full bg-editor text-primary">
       <Titlebar />
       <div className="flex flex-1 min-h-0">
         {/* Activity rail */}
@@ -49,7 +51,8 @@ const Workspace: React.FC = () => {
       <div className="h-40 bg-panel border-t border-panel px-3 py-2 text-xs text-dim">
         Terminal
       </div>
-    </div>
+      </div>
+    </ProjectsProvider>
   )
 }
 

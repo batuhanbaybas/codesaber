@@ -9,7 +9,7 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Create } from "@wailsio/runtime";
+import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -37,20 +37,16 @@ export function ForgetRecent(root: string): $CancellablePromise<void> {
 /**
  * ListProjects returns currently open projects, most recently used first.
  */
-export function ListProjects(): $CancellablePromise<project$0.Project[]> {
-    return $Call.ByID(1843757078).then(($result: any) => {
-        return $$createType1($result);
-    });
+export function ListProjects(): $CancellablePromise<project$0.Project[] | null> {
+    return $Call.ByID(1843757078);
 }
 
 /**
  * ListTree walks root recursively to maxTreeDepth, dirs-first sorted, skipping
  * dotfiles except .env, .gitignore and .github.
  */
-export function ListTree(root: string): $CancellablePromise<$models.Entry[]> {
-    return $Call.ByID(1338655484, root).then(($result: any) => {
-        return $$createType3($result);
-    });
+export function ListTree(root: string): $CancellablePromise<$models.Entry[] | null> {
+    return $Call.ByID(1338655484, root);
 }
 
 /**
@@ -59,9 +55,15 @@ export function ListTree(root: string): $CancellablePromise<$models.Entry[]> {
  * as "fs.change" with {projectId, path, op}.
  */
 export function OpenProject(root: string): $CancellablePromise<project$0.Project> {
-    return $Call.ByID(2520723113, root).then(($result: any) => {
-        return $$createType0($result);
-    });
+    return $Call.ByID(2520723113, root);
+}
+
+/**
+ * PickFolder opens a native folder-picker and returns the chosen absolute
+ * path, or an empty string if the user cancelled the dialog.
+ */
+export function PickFolder(): $CancellablePromise<string> {
+    return $Call.ByID(588397301);
 }
 
 /**
@@ -74,10 +76,8 @@ export function ReadFile(path: string): $CancellablePromise<string> {
 /**
  * RecentProjects returns the persisted recents list.
  */
-export function RecentProjects(): $CancellablePromise<project$0.Recent[]> {
-    return $Call.ByID(1503067661).then(($result: any) => {
-        return $$createType5($result);
-    });
+export function RecentProjects(): $CancellablePromise<project$0.Recent[] | null> {
+    return $Call.ByID(1503067661);
 }
 
 /**
@@ -94,11 +94,3 @@ export function RemoveProject(id: string): $CancellablePromise<void> {
 export function SaveFile(path: string, content: string): $CancellablePromise<void> {
     return $Call.ByID(3028267559, path, content);
 }
-
-// Private type creation functions
-const $$createType0 = project$0.Project.createFrom;
-const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = $models.Entry.createFrom;
-const $$createType3 = $Create.Array($$createType2);
-const $$createType4 = project$0.Recent.createFrom;
-const $$createType5 = $Create.Array($$createType4);
