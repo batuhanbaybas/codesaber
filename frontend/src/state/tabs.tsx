@@ -17,6 +17,7 @@ export interface Tab {
   staleExternally?: boolean
   kind?: 'file' | 'diff'
   diffStaged?: boolean
+  reveal?: { line: number; character: number }
 }
 
 export interface ProjectTabs {
@@ -27,7 +28,12 @@ export interface ProjectTabs {
 interface TabsContextValue {
   tabsByProject: Record<string, ProjectTabs>
   saveError: string | null
-  openFile: (projectId: string, path: string) => Promise<void>
+  openFile: (
+    projectId: string,
+    path: string,
+    opts?: { reveal?: { line: number; character: number } },
+  ) => Promise<void>
+  consumeReveal: (projectId: string, path: string) => void
   close: (projectId: string, path: string) => void
   setActive: (projectId: string, path: string) => void
   setDirty: (projectId: string, path: string, dirty: boolean) => void
@@ -98,7 +104,11 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
   )
 
   const openFile = useCallback(
-    async (projectId: string, path: string) => {
+    async (
+      projectId: string,
+      path: string,
+      opts?: { reveal?: { line: number; character: number } },
+    ) => {
       const existing = tabsRef.current[projectId]?.open.find(
         (t) => t.path === path,
       )
@@ -106,9 +116,17 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
       setTabsByProject((prev) => {
         const st = prev[projectId] ?? { open: [], active: null }
         if (st.open.some((t) => t.path === path)) {
-          return { ...prev, [projectId]: { ...st, active: path } }
+          return {
+            ...prev,
+            [projectId]: { ...st, active: path, open: st.open.map((t) => t.path === path ? { ...t, reveal: opts?.reveal } : t) },
+          }
         }
-        const tab: Tab = { path, title: titleOf(path), dirty: false }
+        const tab: Tab = {
+          path,
+          title: titleOf(path),
+          dirty: false,
+          reveal: opts?.reveal,
+        }
         return {
           ...prev,
           [projectId]: { open: [...st.open, tab], active: path },
@@ -151,6 +169,13 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
       return { ...prev, [projectId]: { open, active } }
     })
   }, [])
+
+  const consumeReveal = useCallback(
+    (projectId: string, path: string) => {
+      mutateTab(projectId, path, () => ({ reveal: undefined }))
+    },
+    [mutateTab],
+  )
 
   const setActive = useCallback((projectId: string, path: string) => {
     setTabsByProject((prev) => {
@@ -287,6 +312,7 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
         saveError,
         openFile,
         close,
+        consumeReveal,
         setActive,
         setDirty,
         save,

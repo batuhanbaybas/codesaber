@@ -84,6 +84,48 @@ const EnginePills: React.FC = () => {
   )
 }
 
+// LSPStatus mirrors the payload of the backend "lsp.state" event.
+interface LSPStatus {
+  running: boolean
+  reason?: string
+}
+
+// GoplsPill shows a green "gopls" dot when the project's language server is
+// running and a gray one on failure (with the reason as tooltip). Only
+// appears once some state has been reported for the active project.
+const GoplsPill: React.FC<{ projectId: string | null }> = ({ projectId }) => {
+  const [byProject, setByProject] = useState<Record<string, LSPStatus>>({})
+
+  useEffect(() => {
+    const off = Events.On('lsp.state', (ev: any) => {
+      const st = ev.data as { projectId?: string; running?: boolean; reason?: string }
+      if (!st?.projectId) return
+      setByProject((prev) => ({
+        ...prev,
+        [st.projectId!]: { running: !!st.running, reason: st.reason },
+      }))
+    })
+    return () => off()
+  }, [])
+
+  const st = projectId ? byProject[projectId] : undefined
+  if (!st) return null
+  const ok = st.running
+  return (
+    <span
+      className="flex items-center gap-1 px-1.5 rounded bg-[#1e1f22]"
+      title={ok ? 'gopls running' : `gopls: ${st.reason ?? 'not running'}`}
+    >
+      <span
+        className={
+          'w-1.5 h-1.5 rounded-full ' + (ok ? 'bg-[#4a9e6b]' : 'bg-[#73767b]')
+        }
+      />
+      <span className="text-dim">{ok ? 'gopls' : 'gopls: not found'}</span>
+    </span>
+  )
+}
+
 const StatusBar: React.FC = () => {
   const { ui, toggle } = useLayout()
   const { activeId } = useProjects()
@@ -95,6 +137,7 @@ const StatusBar: React.FC = () => {
       <div className="flex items-center gap-2">
         <span className="px-2 rounded bg-[#1e1f22] text-primary">{'\u2387'} {branch}</span>
         <EnginePills />
+        <GoplsPill projectId={activeId} />
       </div>
       <div className="flex items-center gap-2">
         <span>aide v0.1</span>
