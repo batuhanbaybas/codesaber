@@ -79,8 +79,8 @@ const colorize = (text: string): ReactNode => {
   return out
 }
 
-const addedBg = 'rgba(13,140,50,0.12)'
-const delBg = 'rgba(200,50,50,0.12)'
+const addedBg = 'rgba(13,140,50,0.13)'
+const delBg = 'rgba(200,50,50,0.13)'
 
 const Hunk: React.FC<{ header: string; lines: string[] }> = ({
   header,
@@ -96,7 +96,7 @@ const Hunk: React.FC<{ header: string; lines: string[] }> = ({
   }
   return (
     <>
-      <div className="px-0 py-0.5 font-mono text-dim bg-[#2a2c31] select-none">
+      <div className="px-0 py-0.5 font-mono text-dim bg-[#242629] text-[10px] tracking-wide select-none">
         {header}
       </div>
       {body.map((l, i) => (
@@ -104,7 +104,7 @@ const Hunk: React.FC<{ header: string; lines: string[] }> = ({
           key={i}
           className={
             'flex ' +
-            (l.op === '+' ? 'text-[#7dcf9e]' : l.op === '-' ? 'text-[#e5735f]' : '')
+            (l.op === '+' ? 'text-[#8ee0a0]' : l.op === '-' ? 'text-[#ef8070]' : '')
           }
           style={{
             backgroundColor:
