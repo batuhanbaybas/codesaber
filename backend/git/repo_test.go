@@ -80,6 +80,65 @@ func TestStatusTracksStagedUnstagedUntracked(t *testing.T) {
 	}
 }
 
+func TestStatusSortsPaths(t *testing.T) {
+	dir := initRepo(t)
+	for _, name := range []string{"c.txt", "a.txt", "b.txt"} {
+		os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644)
+	}
+	e, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := e.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range st.Untracked {
+		got = append(got, c.Path)
+	}
+	if len(got) != 3 || got[0] != "a.txt" || got[1] != "b.txt" || got[2] != "c.txt" {
+		t.Fatalf("untracked order: %v", got)
+	}
+
+	if err := e.Stage([]string{"b.txt", "a.txt", "init.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	st, _ = e.Status()
+	var staged []string
+	for _, c := range st.Staged {
+		staged = append(staged, c.Path)
+	}
+	if len(staged) != 2 || staged[0] != "a.txt" || staged[1] != "b.txt" {
+		t.Fatalf("staged order: %v", staged)
+	}
+}
+
+func TestCommitNothingStaged(t *testing.T) {
+	dir := initRepo(t)
+	e, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(dir, "init.txt"), []byte("dirty"), 0o644)
+	if err := e.Commit("msg", "aide <aide@local>"); err == nil || err.Error() != "nothing staged" {
+		t.Fatalf("Commit dirty worktree, empty index: err=%v", err)
+	}
+	if err := e.Stage([]string{"init.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Commit("staged commit", "aide <aide@local>"); err != nil {
+		t.Fatalf("Commit with staged change: %v", err)
+	}
+	nodes, err := e.Log(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) < 2 || nodes[0].Message != "staged commit" {
+		t.Fatalf("log: %+v", nodes)
+	}
+}
+
 func TestCommit(t *testing.T) {
 	dir := initRepo(t)
 	e, err := New(dir)
@@ -115,5 +174,12 @@ func TestBranchesAndCheckout(t *testing.T) {
 	st, _ := e.Status()
 	if st.Branch != "feature/x" {
 		t.Fatalf("branch: %q", st.Branch)
+	}
+	b, err := e.r.Branch("feature/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Remote != "" || b.Merge.String() != "" {
+		t.Fatalf("branch config should be bare: remote=%q merge=%q", b.Remote, b.Merge)
 	}
 }

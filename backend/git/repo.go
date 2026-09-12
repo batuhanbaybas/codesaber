@@ -2,9 +2,11 @@ package git
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	git2 "github.com/go-git/go-git/v5"
@@ -12,6 +14,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/format/diff"
+	"github.com/go-git/go-git/v5/plumbing/format/index"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	utilsdiff "github.com/go-git/go-git/v5/utils/diff"
 	"github.com/sergi/go-diff/diffmatchpatch"
@@ -66,6 +69,9 @@ func (e *Engine) Status() (Status, error) {
 			st.Unstaged = append(st.Unstaged, Change{Path: path, Status: mapStatus(fs.Worktree)})
 		}
 	}
+	for _, group := range [][]Change{st.Staged, st.Unstaged, st.Untracked} {
+		sort.Slice(group, func(i, j int) bool { return group[i].Path < group[j].Path })
+	}
 	return st, nil
 }
 
@@ -99,13 +105,66 @@ func parseAuthor(author string) *object.Signature {
 	return &object.Signature{Name: strings.TrimSpace(name), Email: email}
 }
 
+func indexMatchesHead(e *Engine) (bool, error) {
+	idx, err := e.r.Storer.Index()
+	if err != nil {
+		return false, err
+	}
+	indexFiles := map[string]plumbing.Hash{}
+	for _, entry := range idx.Entries {
+		if entry.Mode.IsFile() {
+			indexFiles[entry.Name] = entry.Hash
+		}
+	}
+
+	headFiles := map[string]plumbing.Hash{}
+	head, err := e.r.Head()
+	if err != nil {
+		if errors.Is(err, plumbing.ErrReferenceNotFound) {
+			return len(indexFiles) == 0, nil
+		}
+		return false, err
+	}
+	commit, err := e.r.CommitObject(head.Hash())
+	if err != nil {
+		return false, err
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		return false, err
+	}
+	walker := object.NewTreeWalker(tree, true, nil)
+	defer walker.Close()
+	for {
+		name, entry, werr := walker.Next()
+		if werr != nil {
+			if errors.Is(werr, io.EOF) {
+				break
+			}
+			return false, werr
+		}
+		if entry.Mode.IsFile() {
+			headFiles[name] = entry.Hash
+		}
+	}
+	if len(headFiles) != len(indexFiles) {
+		return false, nil
+	}
+	for path, h := range headFiles {
+		if ih, ok := indexFiles[path]; !ok || ih != h {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func (e *Engine) Commit(msg, author string) error {
-	files, err := e.wt.Status()
+	same, err := indexMatchesHead(e)
 	if err != nil {
 		return err
 	}
-	if files.IsClean() {
-		return fmt.Errorf("nothing to commit")
+	if same {
+		return fmt.Errorf("nothing staged")
 	}
 	_, err = e.wt.Commit(msg, &git2.CommitOptions{Author: parseAuthor(author)})
 	return err
@@ -143,11 +202,7 @@ func (e *Engine) CreateBranch(name string) error {
 		return err
 	}
 	ref := plumbing.NewBranchReferenceName(name)
-	if err := e.r.CreateBranch(&config.Branch{
-		Name:   name,
-		Remote: ref.String(),
-		Merge:  ref,
-	}); err != nil {
+	if err := e.r.CreateBranch(&config.Branch{Name: name}); err != nil {
 		return err
 	}
 	return e.r.Storer.SetReference(plumbing.NewHashReference(ref, head.Hash()))
@@ -159,59 +214,64 @@ func (e *Engine) CheckoutBranch(name string) error {
 	})
 }
 
-func blobContent(e *Engine, h plumbing.Hash) []byte {
+func blobContent(e *Engine, h plumbing.Hash) ([]byte, error) {
 	if h.IsZero() {
-		return nil
+		return nil, nil
 	}
 	blob, err := e.r.BlobObject(h)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	r, err := blob.Reader()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer r.Close()
-	data, _ := io.ReadAll(r)
-	return data
+	return io.ReadAll(r)
 }
 
-func indexEntryHash(e *Engine, path string) plumbing.Hash {
+func indexEntryHash(e *Engine, path string) (plumbing.Hash, error) {
 	idx, err := e.r.Storer.Index()
 	if err != nil {
-		return plumbing.ZeroHash
+		return plumbing.ZeroHash, err
 	}
 	entry, err := idx.Entry(path)
 	if err != nil {
-		return plumbing.ZeroHash
+		return plumbing.ZeroHash, err
 	}
-	return entry.Hash
+	return entry.Hash, nil
 }
 
-func headBlobHash(e *Engine, path string) plumbing.Hash {
+func headBlobHash(e *Engine, path string) (plumbing.Hash, error) {
 	head, err := e.r.Head()
 	if err != nil {
-		return plumbing.ZeroHash
+		return plumbing.ZeroHash, err
 	}
 	commit, err := e.r.CommitObject(head.Hash())
 	if err != nil {
-		return plumbing.ZeroHash
+		return plumbing.ZeroHash, err
 	}
 	tree, err := commit.Tree()
 	if err != nil {
-		return plumbing.ZeroHash
+		return plumbing.ZeroHash, err
 	}
 	file, err := tree.File(path)
 	if err != nil {
-		return plumbing.ZeroHash
+		return plumbing.ZeroHash, err
 	}
-	return file.Blob.Hash
+	return file.Blob.Hash, nil
 }
 
-func buildPatch(oldPath, newPath string, from, to []byte) DiffPatch {
+func isNotExistErr(err error) bool {
+	return errors.Is(err, plumbing.ErrObjectNotFound) ||
+		errors.Is(err, object.ErrFileNotFound) ||
+		errors.Is(err, plumbing.ErrReferenceNotFound)
+}
+
+func buildPatch(oldPath, newPath string, from, to []byte) (DiffPatch, error) {
 	patch := DiffPatch{OldPath: oldPath, NewPath: newPath, Hunks: []DiffHunk{}}
 	if bytes.Equal(from, to) {
-		return patch
+		return patch, nil
 	}
 	ud := utilsdiff.Do(string(from), string(to))
 	var sb strings.Builder
@@ -220,9 +280,9 @@ func buildPatch(oldPath, newPath string, from, to []byte) DiffPatch {
 		toPath:   newPath,
 		chunks:   ud,
 	}); err != nil {
-		return patch
+		return DiffPatch{}, err
 	}
-	return parseUnified(patch, sb.String())
+	return parseUnified(patch, sb.String()), nil
 }
 
 type sbWriter struct{ sb *strings.Builder }
@@ -300,17 +360,53 @@ func parseUnified(p DiffPatch, text string) DiffPatch {
 }
 
 func (e *Engine) DiffStaged(path string) (DiffPatch, error) {
-	return buildPatch(path, path, blobContent(e, headBlobHash(e, path)), blobContent(e, indexEntryHash(e, path))), nil
+	headHash, err := headBlobHash(e, path)
+	if err != nil && !isNotExistErr(err) {
+		return DiffPatch{}, err
+	}
+	idxHash, err := indexEntryHash(e, path)
+	if err != nil && !errors.Is(err, index.ErrEntryNotFound) {
+		return DiffPatch{}, err
+	}
+	if headHash.IsZero() && idxHash.IsZero() {
+		return DiffPatch{OldPath: path, NewPath: path, Hunks: []DiffHunk{}}, nil
+	}
+	from, err := blobContent(e, headHash)
+	if err != nil {
+		return DiffPatch{}, err
+	}
+	to, err := blobContent(e, idxHash)
+	if err != nil {
+		return DiffPatch{}, err
+	}
+	return buildPatch(path, path, from, to)
 }
 
 func (e *Engine) DiffUnstaged(path string) (DiffPatch, error) {
-	idxHash := indexEntryHash(e, path)
+	idxHash, err := indexEntryHash(e, path)
+	if err != nil && !errors.Is(err, index.ErrEntryNotFound) {
+		return DiffPatch{}, err
+	}
 	if idxHash.IsZero() {
-		return DiffPatch{OldPath: path, NewPath: path, Hunks: []DiffHunk{}}, nil
+		data, readErr := os.ReadFile(e.wt.Filesystem.Join(e.dir, path))
+		if readErr != nil {
+			if os.IsNotExist(readErr) {
+				return DiffPatch{OldPath: path, NewPath: path, Hunks: []DiffHunk{}}, nil
+			}
+			return DiffPatch{}, readErr
+		}
+		return buildPatch(path, path, nil, data)
 	}
 	data, err := os.ReadFile(e.wt.Filesystem.Join(e.dir, path))
 	if err != nil {
+		if !os.IsNotExist(err) {
+			return DiffPatch{}, err
+		}
 		data = nil
 	}
-	return buildPatch(path, path, blobContent(e, idxHash), data), nil
+	from, err := blobContent(e, idxHash)
+	if err != nil {
+		return DiffPatch{}, err
+	}
+	return buildPatch(path, path, from, data)
 }
