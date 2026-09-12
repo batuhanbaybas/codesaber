@@ -19,15 +19,15 @@ Legend: ✅ done · 🚧 in progress · ⬜ todo · 📌 deferred (was requested
 - ✅ Engine isolation (goroutines, panic recovery/restart scaffolding)
 - 🐛 Fixed: runtime-created windows invisible without explicit Show() (beta.20)
 
-## Phase 2 — Git Panel 🚧 (plan next)
+## Phase 2 — Git Panel ✅ (2026-09-12)
 
-- ⬜ go-git engine: status/stage/unstage, branch listing/switching, diff, log
-- ⬜ Live fsnotify-driven git status refresh
-- ⬜ Git tab: changed files (U/M/A colors, staged/unstaged groups)
-- ⬜ Stage/unstage per file (click, group actions)
-- ⬜ Commit message box + commit
-- ⬜ Branch pill in titlebar wired to real branch, branch switcher
-- ⬜ Inline diff viewer (selected file, staged vs unstaged)
+- ✅ go-git engine: status/stage/unstage, branch listing/switching, diff, log
+- ✅ Live fsnotify-driven git status refresh
+- ✅ Git tab: changed files (U/M/A colors, staged/unstaged groups)
+- ✅ Stage/unstage per file (click, group actions)
+- ✅ Commit message box + commit
+- ✅ Branch pill in titlebar wired to real branch, branch switcher
+- ✅ Inline diff viewer (selected file, staged vs unstaged)
 - 📌 Backdrop: feed diffs to Phase 3 ACP accept/reject UI
 
 ## Phase 3 — ACP Agent ⬜
