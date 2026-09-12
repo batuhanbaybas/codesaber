@@ -125,6 +125,15 @@ export function ForgetRecent(root: string): $CancellablePromise<void> {
 }
 
 /**
+ * GitAheadBehind reports the ahead/behind counts versus the remote-tracking
+ * branch of HEAD. Remote is always "origin" (MVP); a missing upstream or
+ * absent tracking ref yields Remote "" with zeros instead of an error.
+ */
+export function GitAheadBehind(projectID: string): $CancellablePromise<$models.GitSyncInfo> {
+    return $Call.ByID(1722181857, projectID);
+}
+
+/**
  * GitBranches lists local branches (refs/heads, sorted, short names).
  */
 export function GitBranches(projectID: string): $CancellablePromise<string[] | null> {
@@ -160,6 +169,13 @@ export function GitDiff(projectID: string, path: string, staged: boolean): $Canc
 }
 
 /**
+ * GitFetch fetches all configured remotes (30s timeout, no auth MVP).
+ */
+export function GitFetch(projectID: string): $CancellablePromise<void> {
+    return $Call.ByID(1942127076, projectID);
+}
+
+/**
  * GitLog returns the n most recent commit entries walking first-parent from HEAD.
  */
 export function GitLog(projectID: string, n: number): $CancellablePromise<git$0.LogEntry[] | null> {
@@ -167,10 +183,25 @@ export function GitLog(projectID: string, n: number): $CancellablePromise<git$0.
 }
 
 /**
+ * GitPush pushes HEAD to the first remote with its default refspec (MVP: no auth).
+ */
+export function GitPush(projectID: string): $CancellablePromise<void> {
+    return $Call.ByID(2345774328, projectID);
+}
+
+/**
  * GitStage adds files to the index ("add"; deleted files are recorded via "rm").
  */
 export function GitStage(projectID: string, paths: string[] | null): $CancellablePromise<void> {
     return $Call.ByID(670803978, projectID, paths);
+}
+
+/**
+ * GitStats computes on-demand per-file [additions, deletions]; capped at
+ * maxStatsFiles paths per call to keep it cheap.
+ */
+export function GitStats(projectID: string, paths: string[] | null, staged: boolean): $CancellablePromise<{ [_ in string]?: number[] } | null> {
+    return $Call.ByID(975611239, projectID, paths, staged);
 }
 
 /**

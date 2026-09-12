@@ -9,3 +9,13 @@ export interface Entry {
     "path": string;
     "dir": boolean;
 }
+
+/**
+ * GitSyncInfo is the ahead/behind sync state relative to a remote.
+ */
+export interface GitSyncInfo {
+    "remote": string;
+    "branch": string;
+    "ahead": number;
+    "behind": number;
+}

@@ -4,6 +4,7 @@
 export interface Change {
     "path": string;
     "status": ChangeStatus;
+    "size"?: number;
 }
 
 export enum ChangeStatus {
