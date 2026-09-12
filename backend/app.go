@@ -21,6 +21,7 @@ import (
 	"aide/backend/git"
 	"aide/backend/lsp"
 	"aide/backend/project"
+	"aide/backend/search"
 	"aide/backend/terminal"
 )
 
@@ -126,6 +127,11 @@ type App struct {
 	// lastLSPState tracks the last emitted (running, reason) per project so
 	// emitLSPState only fires on actual state changes.
 	lastLSPState map[string]lspState
+
+	// searchMu guards the per-project search cancellation registry: at most
+	// one text search runs per project; a new SearchText cancels the previous.
+	searchMu      sync.Mutex
+	searchCancels map[string]*searchRun
 }
 
 // lspState is the dedup key for EventLSPState emissions.
@@ -158,6 +164,7 @@ func NewWith(sink adapter.EventSink, storePath string) *App {
 		lspPendingDiagPath:   map[string]string{},
 		lspPendingDiagLatest: map[string][]lsp.Diagnostic{},
 		lastLSPState:         map[string]lspState{},
+		searchCancels:        map[string]*searchRun{},
 	}
 	a.lspMgr = lsp.NewManager(a.onLSPDiags)
 	return a
@@ -255,6 +262,12 @@ func (a *App) RemoveProject(id string) error {
 	delete(a.lspPendingDiagLatest, id)
 	delete(a.lastLSPState, id)
 	a.lspMu.Unlock()
+	a.searchMu.Lock()
+	if run := a.searchCancels[id]; run != nil {
+		run.cancel()
+	}
+	delete(a.searchCancels, id)
+	a.searchMu.Unlock()
 	a.CloseWatcher(id)
 	a.stopProjectTerms(id)
 	_ = a.ACPStop(id)
@@ -414,6 +427,43 @@ func (a *App) EnsureWorkspaceWindow() {
 // CloseWelcome hides the welcome window after a project has been opened.
 func (a *App) CloseWelcome() {
 	adapter.CloseWelcomeWindow()
+}
+
+// searchRun is a handle for one in-flight search so an finishing call can
+// only remove its own cancellation entry (funcs are not comparable).
+type searchRun struct {
+	cancel context.CancelFunc
+}
+
+// searchTimeout bounds a single text search; a wedged walk cannot pin the
+// RPC forever.
+const searchTimeout = 20 * time.Second
+
+// SearchText runs a project-wide text search and returns the full result
+// synchronously (MVP: no streaming; a new call for the same project cancels
+// the previous one, and the frontend drops superseded responses by seq).
+func (a *App) SearchText(projectID, term string, regex bool) (search.Result, error) {
+	root, err := a.resolveRoot(projectID)
+	if err != nil {
+		return search.Result{}, err
+	}
+	a.searchMu.Lock()
+	if run := a.searchCancels[projectID]; run != nil {
+		run.cancel()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), searchTimeout)
+	run := &searchRun{cancel: cancel}
+	a.searchCancels[projectID] = run
+	a.searchMu.Unlock()
+	defer func() {
+		a.searchMu.Lock()
+		if a.searchCancels[projectID] == run {
+			delete(a.searchCancels, projectID)
+		}
+		cancel()
+		a.searchMu.Unlock()
+	}()
+	return search.Search(root, search.Query{Term: term, Regex: regex}, ctx)
 }
 
 // resolveRoot returns the absolute project root for the given project ID.
