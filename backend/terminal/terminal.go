@@ -43,9 +43,10 @@ type Session struct {
 	ready  chan struct{}
 	wg     sync.WaitGroup
 
-	waitOnce  sync.Once
-	waitCode  int
-	closeOnce sync.Once
+	waitOnce   sync.Once
+	waitCode   int
+	closeOnce  sync.Once
+	exitedOnce sync.Once
 }
 
 // New starts opts.Shell (with Dir=opts.Cwd) inside a fresh PTY sized
@@ -154,11 +155,14 @@ func (s *Session) Close() error {
 		if s.cmd.Process != nil {
 			_ = s.cmd.Process.Kill()
 		}
-		close(s.exited)
 	})
 	<-s.ready
 	s.wait()
 	_ = s.ptmx.Close()
+	// Join the read loop FIRST: its final Exit event must be delivered while
+	// the exited guard is still open, otherwise the select can race and drop
+	// the exit notification the facade depends on.
 	s.wg.Wait()
+	s.exitedOnce.Do(func() { close(s.exited) })
 	return nil
 }
