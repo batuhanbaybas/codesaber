@@ -30,12 +30,12 @@ Legend: ✅ done · 🚧 in progress · ⬜ todo · 📌 deferred (was requested
 - ✅ Inline diff viewer (selected file, staged vs unstaged)
 - 📌 Backdrop: feed diffs to Phase 3 ACP accept/reject UI
 
-## Phase 3 — ACP Agent ⬜
+## Phase 3 — ACP Agent ✅ (2026-09-12)
 
-- ⬜ ACP client engine (stdio JSON-RPC), harness registry (opencode first, Claude Code verified)
-- ⬜ Agent tab chat: streaming messages, session per project, persistence across restarts
-- ⬜ Tool-call display; diff proposals with accept/reject (reuses Phase 2 diffs)
-- ⬜ Harness crash → respawn, chat preserved; engine status pills wired
+- ✅ ACP client engine (stdio JSON-RPC), harness registry (opencode first, Claude Code verified)
+- ✅ Agent tab chat: streaming messages, session per project, persistence across restarts
+- ✅ Tool-call display; diff proposals with accept/reject (reuses Phase 2 diffs)
+- ✅ Harness crash → respawn, chat preserved; engine status pills wired
 
 ## Phase 4 — gopls LSP ⬜
 
