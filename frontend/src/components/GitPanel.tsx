@@ -536,11 +536,11 @@ const GitPanel: React.FC = () => {
           Create PR
         </button>
       </div>
-      {/* Tab strip: segmented control */}
-      <div className="shrink-0 inline-flex items-center self-start gap-1 p-1 rounded-lg border border-[#333639] bg-[#242629] mb-2">
+      {/* Tab strip: segmented control, full width */}
+      <div className="shrink-0 flex items-stretch gap-1 p-1 rounded-lg border border-[#333639] bg-[#242629] mb-2">
         <button
           className={
-            'flex items-center gap-1.5 px-3 h-7 rounded-md text-xs ' +
+            'flex-1 flex items-center justify-center gap-1.5 px-3 h-7 rounded-md text-xs ' +
             (tab === 'changes'
               ? 'bg-[#333639] text-white'
               : 'text-dim hover:text-white')
@@ -554,7 +554,7 @@ const GitPanel: React.FC = () => {
         </button>
         <button
           className={
-            'flex items-center gap-1.5 px-3 h-7 rounded-md text-xs ' +
+            'flex-1 flex items-center justify-center gap-1.5 px-3 h-7 rounded-md text-xs ' +
             (tab === 'history'
               ? 'bg-[#333639] text-white'
               : 'text-dim hover:text-white')
@@ -569,7 +569,7 @@ const GitPanel: React.FC = () => {
           )}
         </button>
         <button
-          className="flex items-center px-3 h-7 rounded-md text-xs text-[#4a4f55] cursor-not-allowed"
+          className="flex-1 flex items-center justify-center px-3 h-7 rounded-md text-xs text-[#4a4f55] cursor-not-allowed"
           title="Coming soon"
           disabled
         >
