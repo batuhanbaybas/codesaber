@@ -68,6 +68,25 @@ func main() {
 		switch rq.Method {
 		case "initialize":
 			reply(os.Stdout, rq.ID, map[string]any{"capabilities": map[string]any{}})
+		case "textDocument/didOpen":
+			var p struct {
+				TextDocument struct {
+					URI string `json:"uri"`
+				} `json:"textDocument"`
+			}
+			_ = json.Unmarshal(rq.Params, &p)
+			write(os.Stdout, frame{
+				Jsonrpc: "2.0",
+				Method:  "textDocument/publishDiagnostics",
+				Params: map[string]any{
+					"uri": p.TextDocument.URI,
+					"diagnostics": []map[string]any{{
+						"range": mkRange(2, 0, 2, 5),
+						"severity": 1,
+						"message": "fake diagnostic",
+					}},
+				},
+			})
 		case "textDocument/definition":
 			reply(os.Stdout, rq.ID, []map[string]any{{
 				"uri": "file:///x/other.go",

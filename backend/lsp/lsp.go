@@ -69,6 +69,14 @@ func toURI(path string) string {
 	return u.String()
 }
 
+// ToURI is the exported filesystem-path → file://-URI converter used by
+// facade layers outside the package.
+func ToURI(path string) string { return toURI(path) }
+
+// FromURI is the exported file://-URI → filesystem-path converter used by
+// facade layers outside the package. Non-file URIs are returned unchanged.
+func FromURI(uri string) (string, error) { return fromURI(uri) }
+
 // fromURI converts a file:// URI back to a filesystem path. Non-file URIs
 // are returned unchanged.
 func fromURI(uri string) (string, error) {

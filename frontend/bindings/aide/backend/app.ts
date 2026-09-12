@@ -22,6 +22,9 @@ import * as agentstore$0 from "./agentstore/models.js";
 import * as git$0 from "./git/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as lsp$0 from "./lsp/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as project$0 from "./project/models.js";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -192,6 +195,67 @@ export function GitUnstage(projectID: string, paths: string[] | null): $Cancella
  */
 export function IndexFiles(root: string): $CancellablePromise<string[] | null> {
     return $Call.ByID(2535220543, root);
+}
+
+/**
+ * LSPDefinition resolves Go-to-definition at a position; result URIs are
+ * translated back into absolute filesystem paths for the frontend.
+ */
+export function LSPDefinition(projectID: string, path: string, line: number, col: number): $CancellablePromise<lsp$0.Location[] | null> {
+    return $Call.ByID(1172110830, projectID, path, line, col);
+}
+
+/**
+ * LSPDidChange sends the full document content at the new version.
+ */
+export function LSPDidChange(projectID: string, path: string, version: number, content: string): $CancellablePromise<void> {
+    return $Call.ByID(3930146568, projectID, path, version, content);
+}
+
+/**
+ * LSPDidClose tells gopls the document is no longer open; no-op when the
+ * server is not running (never spawns one for a close).
+ */
+export function LSPDidClose(projectID: string, path: string): $CancellablePromise<void> {
+    return $Call.ByID(2716674228, projectID, path);
+}
+
+/**
+ * LSPDidOpen notifies gopls of an opened document (full text sync).
+ */
+export function LSPDidOpen(projectID: string, path: string, version: number, content: string): $CancellablePromise<void> {
+    return $Call.ByID(2327425720, projectID, path, version, content);
+}
+
+/**
+ * LSPDidSave signals a save ("includeText" style with the saved content
+ * handled by the caller passing text; empty text means notify-only).
+ */
+export function LSPDidSave(projectID: string, path: string, content: string): $CancellablePromise<void> {
+    return $Call.ByID(1892506221, projectID, path, content);
+}
+
+/**
+ * LSPEnsure explicitly starts the project's gopls (state reporting happens
+ * inside ensureLSP). Guests call it on opening the first .go tab; startup is
+ * otherwise lazy via LSPDidOpen.
+ */
+export function LSPEnsure(projectID: string): $CancellablePromise<void> {
+    return $Call.ByID(1309978857, projectID);
+}
+
+/**
+ * LSPHover resolves hover markdown-ish content at a position (nil = none).
+ */
+export function LSPHover(projectID: string, path: string, line: number, col: number): $CancellablePromise<lsp$0.Hover | null> {
+    return $Call.ByID(3611164931, projectID, path, line, col);
+}
+
+/**
+ * LSPSymbols returns hierarchical document symbols for the file.
+ */
+export function LSPSymbols(projectID: string, path: string): $CancellablePromise<lsp$0.DocumentSymbol[] | null> {
+    return $Call.ByID(2947905296, projectID, path);
 }
 
 /**

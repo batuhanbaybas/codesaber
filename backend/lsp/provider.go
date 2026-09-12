@@ -3,7 +3,10 @@ package lsp
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -13,19 +16,29 @@ import (
 var OptionalBinaryPath string
 
 // defaultBinaryPath is the binary Options wiring in aide.json (Phase 6)
-// will make configurable. gopls must be on PATH otherwise.
+// will make configurable. gopls must be on PATH (or in GOPATH/bin) otherwise.
 const defaultBinaryPath = "gopls"
 
-// goplsBinaryPath resolves the server binary: optional override, then PATH.
+// goplsBinaryPath resolves the server binary: optional override, then PATH,
+// then GOPATH/bin (gopls is commonly installed there but the GUI process may
+// not inherit it in PATH).
 func goplsBinaryPath() (string, error) {
 	if OptionalBinaryPath != "" {
 		return OptionalBinaryPath, nil
 	}
 	bin, err := exec.LookPath(defaultBinaryPath)
-	if err != nil {
-		return "", fmt.Errorf("lsp: %q not found (install gopls): %w", defaultBinaryPath, err)
+	if err == nil {
+		return bin, nil
 	}
-	return bin, nil
+	if out, gerr := exec.Command("go", "env", "GOPATH").Output(); gerr == nil {
+		cand := filepath.Join(strings.TrimSpace(string(out)), "bin", defaultBinaryPath)
+		if abs, aerr := filepath.Abs(cand); aerr == nil {
+			if _, serr := os.Stat(abs); serr == nil {
+				return abs, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("lsp: %q not found (install gopls): %w", defaultBinaryPath, err)
 }
 
 // Manager owns one language-server client per project; clients are spawned

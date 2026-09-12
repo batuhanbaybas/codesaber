@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"aide/backend/git"
+	"aide/backend/lsp"
 )
 
 type fakeSink struct {
@@ -591,5 +592,167 @@ func TestRemoveProject_StopsWatcher(t *testing.T) {
 	}
 	if _, err := app.reg.Get(p.ID); err == nil {
 		t.Fatal("project should be removed from registry")
+	}
+}
+
+// buildFakeLSPApp compiles the lspfake test server (backend/lsp/testdata) for
+// facade tests that exercise the real subprocess path end to end.
+func buildFakeLSPApp(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "lspfake")
+	cmd := exec.Command("go", "build", "-o", bin, "./lsp/testdata/lspfake")
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build lspfake: %v: %s", err, out)
+	}
+	return bin
+}
+
+func newGoModuleProject(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module fakeproj\n\ngo 1.21\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func TestLSPFacade_FlowWithFakeServer(t *testing.T) {
+	fake := buildFakeLSPApp(t)
+	lsp.OptionalBinaryPath = fake
+	defer func() { lsp.OptionalBinaryPath = "" }()
+
+	app, sink := newTestApp(t)
+	root := newGoModuleProject(t)
+	p, err := app.OpenProject(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "main.go")
+	content := "package main\n\nfunc main() {}\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// didOpen → state event and version bookkeeping
+	if err := app.LSPDidOpen(p.ID, path, 1, content); err != nil {
+		t.Fatalf("LSPDidOpen: %v", err)
+	}
+	ev := sink.waitFor(t, "lsp.state", 5*time.Second)
+	st, ok := ev.payload.(map[string]any)
+	if !ok || st["running"] != true || st["projectId"] != p.ID {
+		t.Fatalf("lsp.state payload = %#v", ev.payload)
+	}
+
+	// definition → location translated back to a path
+	locs, err := app.LSPDefinition(p.ID, path, 3, 7)
+	if err != nil {
+		t.Fatalf("LSPDefinition: %v", err)
+	}
+	if len(locs) != 1 || locs[0].URI != "/x/other.go" || locs[0].Range.Start.Line != 4 {
+		t.Fatalf("definition = %#v", locs)
+	}
+
+	// hover
+	h, err := app.LSPHover(p.ID, path, 0, 0)
+	if err != nil || h == nil || string(h.Contents) != `"hover doc"` {
+		t.Fatalf("hover = %v err %v", h, err)
+	}
+
+	// symbols
+	syms, err := app.LSPSymbols(p.ID, path)
+	if err != nil || len(syms) != 1 || syms[0].Name != "Main" {
+		t.Fatalf("symbols = %#v err %v", syms, err)
+	}
+
+	// didChange bumps the version bookkeeping
+	if err := app.LSPDidChange(p.ID, path, 2, content+"// edited\n"); err != nil {
+		t.Fatalf("LSPDidChange: %v", err)
+	}
+	app.lspMu.Lock()
+	v := app.lspVersions[p.ID][path]
+	app.lspMu.Unlock()
+	if v != 2 {
+		t.Fatalf("version = %d, want 2", v)
+	}
+
+	if err := app.LSPDidSave(p.ID, path, content); err != nil {
+		t.Fatalf("LSPDidSave: %v", err)
+	}
+
+	// lspfake publishes diagnostics on didOpen; the facade must re-emit them
+	// as lsp.diag with the file path restored from the URI.
+	diagEv := sink.waitFor(t, "lsp.diag", 5*time.Second)
+	diag, ok := diagEv.payload.(map[string]any)
+	if !ok || diag["projectId"] != p.ID || diag["path"] != path {
+		t.Fatalf("lsp.diag payload = %#v", diagEv.payload)
+	}
+	if ds, ok := diag["diagnostics"].([]lsp.Diagnostic); !ok || len(ds) != 1 || ds[0].Message != "fake diagnostic" {
+		t.Fatalf("diagnostics payload = %#v", diag["diagnostics"])
+	}
+
+	if err := app.LSPDidClose(p.ID, path); err != nil {
+		t.Fatalf("LSPDidClose: %v", err)
+	}
+
+	// remove stops the server and clears bookkeeping
+	if err := app.RemoveProject(p.ID); err != nil {
+		t.Fatalf("RemoveProject: %v", err)
+	}
+	app.lspMu.Lock()
+	_, hasVersion := app.lspVersions[p.ID]
+	app.lspMu.Unlock()
+	if hasVersion {
+		t.Fatal("version bookkeeping survived RemoveProject")
+	}
+	if c := app.lspMgr.Client(p.ID); c != nil {
+		t.Fatal("client survived RemoveProject")
+	}
+}
+
+func TestLSPFacade_MissingBinaryEmitsFailureState(t *testing.T) {
+	lsp.OptionalBinaryPath = ""
+	t.Setenv("PATH", "/nonexistent")
+	app, sink := newTestApp(t)
+	root := newGoModuleProject(t)
+	p, err := app.OpenProject(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = app.LSPDidOpen(p.ID, filepath.Join(root, "main.go"), 1, "package main\n")
+	if err == nil {
+		t.Fatal("expected error for missing gopls")
+	}
+	ev := sink.waitFor(t, "lsp.state", 5*time.Second)
+	st, ok := ev.payload.(map[string]any)
+	if !ok || st["running"] != false || st["projectId"] != p.ID {
+		t.Fatalf("lsp.state payload = %#v", ev.payload)
+	}
+	if _, hasReason := st["reason"]; !hasReason {
+		t.Fatalf("missing reason in payload: %#v", st)
+	}
+}
+
+func TestLSPFacade_NonGoModuleRoot(t *testing.T) {
+	fake := buildFakeLSPApp(t)
+	lsp.OptionalBinaryPath = fake
+	defer func() { lsp.OptionalBinaryPath = "" }()
+
+	app, sink := newTestApp(t)
+	p, err := app.OpenProject(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.LSPDidOpen(p.ID, filepath.Join(p.Root, "main.go"), 1, "package main\n"); err == nil {
+		t.Fatal("expected error for non-Go-module root")
+	} else if !strings.Contains(err.Error(), "not a Go module") {
+		t.Fatalf("error = %v", err)
+	}
+	ev := sink.waitFor(t, "lsp.state", 5*time.Second)
+	st, ok := ev.payload.(map[string]any)
+	if !ok || st["running"] != false {
+		t.Fatalf("lsp.state payload = %#v", ev.payload)
 	}
 }

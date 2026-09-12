@@ -16,7 +16,10 @@ import (
 	"aide/backend/editor"
 	"aide/backend/fswatch"
 	"aide/backend/git"
+	"aide/backend/lsp"
 	"aide/backend/project"
+
+	"context"
 
 	"aide/backend/agentstore"
 )
@@ -54,6 +57,18 @@ const EventGitStatus = "git.status"
 // EventGitError reports git failures the UI should surface inline: {projectId, message}.
 const EventGitError = "git.error"
 
+// EventLSPDiag carries gopls diagnostics for one file: {projectId, path, diagnostics[]}.
+const EventLSPDiag = "lsp.diag"
+
+// EventLSPState reports language-server lifecycle per project:
+// {projectId, running, reason?}. reason explains a failure (missing gopls,
+// non-Go-module root).
+const EventLSPState = "lsp.state"
+
+// lspDiagThrottle collapses gopls diagnostic bursts per project, mirroring
+// the gitStatusThrottle leading/trailing pattern.
+const lspDiagThrottle = 200 * time.Millisecond
+
 // gitStatusThrottle collapses fs-event storms: per project, git.status events
 // are emitted at most once per window; a change arriving inside the window
 // arms one trailing timer so the FINAL state of a burst is always emitted.
@@ -67,12 +82,19 @@ type App struct {
 	store       *project.Store
 	buf         *editor.Service
 	chats       *agentstore.Store
+	lspMgr      *lsp.Manager
 	mu          sync.Mutex
 	watchers    map[string]*fswatch.Watcher
 	closed      map[string]bool
 	lastGitEmit map[string]time.Time
 	pendingEmit map[string]bool
 	agents      map[string]*agentSession
+
+	// lspMu guards LSP bookkeeping (per-path versions and diag throttles).
+	lspMu          sync.Mutex
+	lspVersions    map[string]map[string]int
+	lastDiagEmit   map[string]time.Time
+	lspPendingDiag map[string]bool
 }
 
 // New wires the engines together. sink receives all backend→UI events.
@@ -82,16 +104,21 @@ func New(sink adapter.EventSink) *App {
 
 // NewWith is New with an injectable recents store path (for tests).
 func NewWith(sink adapter.EventSink, storePath string) *App {
-	return &App{
-		sink:     sink,
-		reg:      project.NewRegistry(func() {}),
-		store:    project.NewStore(storePath),
-		buf:      editor.New(),
-		chats:    agentstore.NewStore(),
-		watchers: map[string]*fswatch.Watcher{},
-		closed:   map[string]bool{},
-		agents:   map[string]*agentSession{},
+	a := &App{
+		sink:           sink,
+		reg:            project.NewRegistry(func() {}),
+		store:          project.NewStore(storePath),
+		buf:            editor.New(),
+		chats:          agentstore.NewStore(),
+		watchers:       map[string]*fswatch.Watcher{},
+		closed:         map[string]bool{},
+		agents:         map[string]*agentSession{},
+		lspVersions:    map[string]map[string]int{},
+		lastDiagEmit:   map[string]time.Time{},
+		lspPendingDiag: map[string]bool{},
 	}
+	a.lspMgr = lsp.NewManager(a.onLSPDiags)
+	return a
 }
 
 // OpenProject registers the project, remembers it in recents, starts a
@@ -176,6 +203,14 @@ func (a *App) RemoveProject(id string) error {
 	if err := a.reg.Remove(id); err != nil {
 		return err
 	}
+	if err := a.lspMgr.Remove(id); err != nil {
+		return err
+	}
+	a.lspMu.Lock()
+	delete(a.lspVersions, id)
+	delete(a.lastDiagEmit, id)
+	delete(a.lspPendingDiag, id)
+	a.lspMu.Unlock()
 	a.CloseWatcher(id)
 	_ = a.ACPStop(id)
 	a.sink.Emit(project.EventRemoved, map[string]any{"id": id, "root": p.Root})
@@ -505,4 +540,183 @@ func (a *App) emitGitStatusBody(projectID string) {
 		return
 	}
 	a.sink.Emit(EventGitStatus, map[string]any{"projectId": projectID, "status": st})
+}
+
+// onLSPDiags is the Manager-level diagnostics callback: it converts the
+// server URI back to a workspace path and funnels the delivery through the
+// per-project throttle.
+func (a *App) onLSPDiags(projectID, uri string, diags []lsp.Diagnostic) {
+	path, err := lsp.FromURI(uri)
+	if err != nil {
+		path = uri
+	}
+	a.emitLSPDiag(projectID, path, diags)
+}
+
+// emitLSPDiag applies the leading/trailing throttle (windows per project)
+// before emitting EventLSPDiag, so diagnostic bursts cost one event each.
+func (a *App) emitLSPDiag(projectID, path string, diags []lsp.Diagnostic) {
+	a.lspMu.Lock()
+	if time.Since(a.lastDiagEmit[projectID]) < lspDiagThrottle {
+		if !a.lspPendingDiag[projectID] {
+			a.lspPendingDiag[projectID] = true
+			wait := lspDiagThrottle - time.Since(a.lastDiagEmit[projectID])
+			latest := diags
+			lspPath := path
+			a.lspMu.Unlock()
+			time.AfterFunc(wait, func() {
+				a.lspMu.Lock()
+				if !a.lspPendingDiag[projectID] {
+					a.lspMu.Unlock()
+					return
+				}
+				a.lspPendingDiag[projectID] = false
+				a.lastDiagEmit[projectID] = time.Now()
+				a.lspMu.Unlock()
+				a.sink.Emit(EventLSPDiag, map[string]any{
+					"projectId": projectID, "path": lspPath, "diagnostics": latest,
+				})
+			})
+			return
+		}
+		a.lspMu.Unlock()
+		return
+	}
+	a.lastDiagEmit[projectID] = time.Now()
+	a.lspMu.Unlock()
+
+	a.sink.Emit(EventLSPDiag, map[string]any{
+		"projectId": projectID, "path": path, "diagnostics": diags,
+	})
+}
+
+// emitLSPState reports running/reason for the project's gopls lifecycle.
+func (a *App) emitLSPState(projectID string, running bool, reason string) {
+	payload := map[string]any{"projectId": projectID, "running": running}
+	if reason != "" {
+		payload["reason"] = reason
+	}
+	a.sink.Emit(EventLSPState, payload)
+}
+
+// ensureLSP resolves the project root, verifies it is a Go module, and
+// ensures the gopls client is running; success/failure is reported via
+// EventLSPState.
+func (a *App) ensureLSP(projectID string) (*lsp.Client, error) {
+	root, err := a.resolveRoot(projectID)
+	if err != nil {
+		a.emitLSPState(projectID, false, err.Error())
+		return nil, err
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "go.mod")); statErr != nil {
+		err := fmt.Errorf("lsp: project root is not a Go module (missing go.mod)")
+		a.emitLSPState(projectID, false, err.Error())
+		return nil, err
+	}
+	c, err := a.lspMgr.Ensure(projectID, lsp.ToURI(root))
+	if err != nil {
+		a.emitLSPState(projectID, false, err.Error())
+		return nil, err
+	}
+	a.emitLSPState(projectID, true, "")
+	return c, nil
+}
+
+// setLSPVersion records the frontend's doc version for projectID/path.
+func (a *App) setLSPVersion(projectID, path string, version int) {
+	a.lspMu.Lock()
+	if a.lspVersions[projectID] == nil {
+		a.lspVersions[projectID] = map[string]int{}
+	}
+	a.lspVersions[projectID][path] = version
+	a.lspMu.Unlock()
+}
+
+// LSPEnsure explicitly starts the project's gopls (state reporting happens
+// inside ensureLSP). Guests call it on opening the first .go tab; startup is
+// otherwise lazy via LSPDidOpen.
+func (a *App) LSPEnsure(projectID string) error {
+	_, err := a.ensureLSP(projectID)
+	return err
+}
+
+// LSPDidOpen notifies gopls of an opened document (full text sync).
+func (a *App) LSPDidOpen(projectID, path string, version int, content string) error {
+	c, err := a.ensureLSP(projectID)
+	if err != nil {
+		return err
+	}
+	a.setLSPVersion(projectID, path, version)
+	return c.DidOpen(lsp.ToURI(path), int32(version), content)
+}
+
+// LSPDidChange sends the full document content at the new version.
+func (a *App) LSPDidChange(projectID, path string, version int, content string) error {
+	c := a.lspMgr.Client(projectID)
+	if c == nil {
+		return fmt.Errorf("lsp: no running server for project %s", projectID)
+	}
+	a.setLSPVersion(projectID, path, version)
+	return c.DidChange(lsp.ToURI(path), int32(version), content)
+}
+
+// LSPDidSave signals a save ("includeText" style with the saved content
+// handled by the caller passing text; empty text means notify-only).
+func (a *App) LSPDidSave(projectID, path, content string) error {
+	if c := a.lspMgr.Client(projectID); c != nil {
+		return c.DidSave(lsp.ToURI(path), content)
+	}
+	return nil
+}
+
+// LSPDidClose tells gopls the document is no longer open; no-op when the
+// server is not running (never spawns one for a close).
+func (a *App) LSPDidClose(projectID, path string) error {
+	if c := a.lspMgr.Client(projectID); c != nil {
+		return c.DidClose(lsp.ToURI(path))
+	}
+	return nil
+}
+
+// LSPDefinition resolves Go-to-definition at a position; result URIs are
+// translated back into absolute filesystem paths for the frontend.
+func (a *App) LSPDefinition(projectID, path string, line, col int32) ([]lsp.Location, error) {
+	c := a.lspMgr.Client(projectID)
+	if c == nil {
+		return nil, fmt.Errorf("lsp: no running server for project %s", projectID)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	locs, err := c.Definition(ctx, lsp.ToURI(path), line, col)
+	if err != nil {
+		return nil, err
+	}
+	for i := range locs {
+		if p, perr := lsp.FromURI(locs[i].URI); perr == nil {
+			locs[i].URI = p
+		}
+	}
+	return locs, nil
+}
+
+// LSPHover resolves hover markdown-ish content at a position (nil = none).
+func (a *App) LSPHover(projectID, path string, line, col int32) (*lsp.Hover, error) {
+	c := a.lspMgr.Client(projectID)
+	if c == nil {
+		return nil, fmt.Errorf("lsp: no running server for project %s", projectID)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return c.Hover(ctx, lsp.ToURI(path), line, col)
+}
+
+// LSPSymbols returns hierarchical document symbols for the file.
+func (a *App) LSPSymbols(projectID, path string) ([]lsp.DocumentSymbol, error) {
+	c := a.lspMgr.Client(projectID)
+	if c == nil {
+		return nil, fmt.Errorf("lsp: no running server for project %s", projectID)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return c.DocumentSymbols(ctx, lsp.ToURI(path))
 }
