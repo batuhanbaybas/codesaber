@@ -6,8 +6,7 @@ import React, {
   useState,
 } from 'react'
 import { useProjects } from '../state/projects'
-
-const VERSION = 'v0.1.0'
+import { APP_VERSION } from '../version'
 
 interface Command {
   id: string
@@ -97,7 +96,7 @@ const CommandPalette: React.FC = () => {
     cmds.push({
       id: 'about',
       name: 'About aide',
-      hint: `aide ${VERSION}`,
+      hint: `aide ${APP_VERSION}`,
       run: () => close(),
     })
     return cmds

@@ -11,6 +11,7 @@ import AgentPanel from '../components/AgentPanel'
 import { ProjectsProvider, useProjects } from '../state/projects'
 import { TabsProvider } from '../state/tabs'
 import { GitProvider, useGit } from '../state/git'
+import { DiagCounterProvider } from '../state/diagstore'
 import { AgentProvider } from '../state/agent'
 import {
   LayoutProvider,
@@ -398,13 +399,15 @@ const Workspace: React.FC = () => {
     <ProjectsProvider>
       <TabsProvider>
         <GitProvider>
-          <AgentProvider>
-            <LayoutProvider>
-              <TerminalProvider>
-                <WorkspaceInner />
-              </TerminalProvider>
-            </LayoutProvider>
-          </AgentProvider>
+          <DiagCounterProvider>
+            <AgentProvider>
+              <LayoutProvider>
+                <TerminalProvider>
+                  <WorkspaceInner />
+                </TerminalProvider>
+              </LayoutProvider>
+            </AgentProvider>
+          </DiagCounterProvider>
         </GitProvider>
       </TabsProvider>
     </ProjectsProvider>

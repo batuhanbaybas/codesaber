@@ -306,8 +306,24 @@ const gotoOnModClick = (
     },
   })
 
-const lspTheme = EditorView.theme({
-  '.cm-lsp-diag-gutter': { width: '10px' },
+// publishCursor emits the caret position for the status bar via a window
+// CustomEvent, debounced 100ms (shared timer — latest position wins).
+let cursorTimer: number | undefined
+const publishCursor = (state: EditorState): void => {
+  if (cursorTimer !== undefined) window.clearTimeout(cursorTimer)
+  cursorTimer = window.setTimeout(() => {
+    cursorTimer = undefined
+    const pos = state.selection.main.head
+    const line = state.doc.lineAt(pos)
+    window.dispatchEvent(
+      new CustomEvent('aide:cursor', {
+        detail: { line: line.number, col: pos - line.from + 1 },
+      }),
+    )
+  }, 100)
+}
+
+const lspTheme = EditorView.theme({  '.cm-lsp-diag-gutter': { width: '10px' },
   '.cm-lsp-diag-dot': {
     width: '7px',
     height: '7px',
@@ -392,6 +408,9 @@ const TabEditor: React.FC<{
           modTracker,
           ...(isGo ? [goHover(projectId, tab.path), gotoOnModClick(projectId, tab.path, onOpenFileRef.current)] : []),
           EditorView.updateListener.of((u) => {
+            if (u.selectionSet || u.docChanged) {
+              publishCursor(u.state)
+            }
             if (!u.docChanged) return
             if (isGo) {
               LSP.didChange(projectId, tab.path, u.state.doc.toString())

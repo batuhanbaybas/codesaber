@@ -17,6 +17,8 @@ export const diffKey = (projectId: string, path: string, staged: boolean) =>
 interface GitContextValue {
   status: Record<string, Status>
   errors: Record<string, string>
+  /** Ahead/behind versus the remote-tracking branch, per project. */
+  sync: Record<string, { ahead: number; behind: number; remote: string }>
   diffs: Record<string, DiffPatch>
   /** Bumped whenever diff-cache entries are invalidated. */
   diffVersion: number
@@ -52,6 +54,9 @@ export const GitProvider: React.FC<{ children: React.ReactNode }> = ({
 }) => {
   const [status, setStatus] = useState<Record<string, Status>>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [sync, setSync] = useState<
+    Record<string, { ahead: number; behind: number; remote: string }>
+  >({})
   const [diffs, setDiffs] = useState<Record<string, DiffPatch>>({})
   const [diffVersion, setDiffVersion] = useState(0)
   const diffsRef = useRef(diffs)
@@ -103,6 +108,25 @@ export const GitProvider: React.FC<{ children: React.ReactNode }> = ({
       } catch {
         // not a repo / unmapped project — leave any error event to report it
       }
+      // Ahead/behind is best-effort: no upstream (or non-repo) just clears
+      // the entry so the status bar hides the ↓/↑ chip.
+      try {
+        const info = await App.GitAheadBehind(projectId)
+        setSync((prev) => ({
+          ...prev,
+          [projectId]: {
+            ahead: info.ahead ?? 0,
+            behind: info.behind ?? 0,
+            remote: info.remote ?? '',
+          },
+        }))
+      } catch {
+        setSync((prev) => {
+          const next = { ...prev }
+          delete next[projectId]
+          return next
+        })
+      }
     },
     [],
   )
@@ -145,6 +169,11 @@ export const GitProvider: React.FC<{ children: React.ReactNode }> = ({
         return next
       })
       setStatus((prev) => {
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
+      setSync((prev) => {
         const next = { ...prev }
         delete next[id]
         return next
@@ -230,6 +259,7 @@ export const GitProvider: React.FC<{ children: React.ReactNode }> = ({
       value={{
         status,
         errors,
+        sync,
         diffs,
         diffVersion,
         setError,
