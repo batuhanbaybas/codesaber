@@ -3,6 +3,7 @@ import Titlebar from '../components/Titlebar'
 import Sidebar from '../components/Sidebar'
 import EditorTabs from '../components/EditorTabs'
 import Editor from '../components/Editor'
+import CommandPalette from '../components/CommandPalette'
 import StatusBar from '../components/StatusBar'
 import { ProjectsProvider } from '../state/projects'
 import { TabsProvider } from '../state/tabs'
@@ -49,6 +50,7 @@ const Workspace: React.FC = () => {
         </div>
       </div>
       <StatusBar />
+      <CommandPalette />
       {/* Bottom strip: terminal placeholder */}
       <div className="h-40 bg-panel border-t border-panel px-3 py-2 text-xs text-dim">
         Terminal
