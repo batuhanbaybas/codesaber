@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Events } from '@wailsio/runtime'
 import * as App from '../../bindings/aide/backend/app'
+import { useLayout } from '../state/layout'
 
 // EngineStatus mirrors the payload of the backend "engine.status" event.
 interface EngineStatus {
@@ -82,13 +83,24 @@ const EnginePills: React.FC = () => {
 }
 
 const StatusBar: React.FC = () => {
+  const { ui, toggle } = useLayout()
   return (
     <div className="h-6 shrink-0 flex items-center justify-between px-3 bg-panel border-t border-panel text-[11px] text-dim">
       <div className="flex items-center gap-2">
         <span className="px-2 rounded bg-[#1e1f22] text-primary">{'\u2387'} main</span>
         <EnginePills />
       </div>
-      <span>aide v0.1</span>
+      <div className="flex items-center gap-2">
+        <span>aide v0.1</span>
+        <button
+          onClick={() => toggle('terminal')}
+          className="no-drag w-5 h-4 rounded flex items-center justify-center text-dim hover:text-primary hover:bg-[#373940]"
+          title={ui.terminal ? 'Hide terminal (⌘J)' : 'Show terminal (⌘J)'}
+          aria-label="Toggle terminal panel"
+        >
+          {ui.terminal ? '\u2325' : '\u2325'}
+        </button>
+      </div>
     </div>
   )
 }

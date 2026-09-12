@@ -1,12 +1,27 @@
 import React from 'react'
 import FileTree from './FileTree'
 import { useProjects } from '../state/projects'
+import { useLayout } from '../state/layout'
 
 const Sidebar: React.FC = () => {
   const { projects, activeId, open, remove, setActive } = useProjects()
+  const { ui, toggle } = useLayout()
 
   return (
-    <div className="bg-panel w-60 shrink-0 border-r border-panel flex flex-col text-xs">
+    <div
+      className={
+        'collapsible relative shrink-0 border-r border-panel bg-panel h-full flex flex-col text-xs ' +
+        (ui.sidebar ? 'w-60' : 'collapsed')
+      }
+    >
+      <button
+        onClick={() => toggle('sidebar')}
+        className="no-drag absolute top-1.5 right-1 z-10 w-5 h-5 rounded flex items-center justify-center text-dim hover:text-primary hover:bg-[#373940]"
+        title="Collapse sidebar (⌘B)"
+        aria-label="Collapse sidebar"
+      >
+        {'\u2039'}
+      </button>
       <button
         onClick={() => void open()}
         className="no-drag mx-2 mt-2 mb-1 px-2 py-1.5 rounded bg-[#2b4d75] hover:bg-[#35597e] text-left text-[11px]"
