@@ -201,6 +201,64 @@ func TestSessionSurfacesUpdateNotifications(t *testing.T) {
 	}
 }
 
+// TestSessionUpdatesDeliveredLive verifies updates reach OnUpdate BEFORE
+// Prompt returns (live delivery, not post-response batching).
+func TestSessionUpdatesDeliveredLive(t *testing.T) {
+	h := newHarness(t, ClientHandlers{})
+	release := make(chan struct{})
+	h.serveAgentScript(t, func(id any, method string, params map[string]any) string {
+		switch method {
+		case MethodInitialize:
+			return fmtResponse(id, map[string]any{"protocolVersion": 1})
+		case MethodSessionNew:
+			return fmtResponse(id, map[string]any{"sessionId": "s-1"})
+		case MethodSessionPrompt:
+			notif := NewNotify(MethodSessionUpdate, map[string]any{
+				"sessionId": "s-1",
+				"update": map[string]any{
+					"sessionUpdate": UpdateAgentMessageChunk,
+					"content":       map[string]any{"type": "text", "text": "live"},
+				},
+			})
+			h.agentIn.Write(notif.MarshalLine())
+			<-release // hold the response open
+			return fmtResponse(id, map[string]any{"stopReason": StopReasonEndTurn})
+		}
+		return fmtResponse(id, map[string]any{})
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	s, err := startSessionOnConn(ctx, h.conn, "/proj/root", ClientHandlers{})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	promptReturned := make(chan struct{})
+	var sawLive bool
+	s.OnUpdate = func(u SessionUpdate) {
+		select {
+		case <-promptReturned:
+			t.Error("OnUpdate fired after Prompt returned (batched, not live)")
+		default:
+			sawLive = true
+		}
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.Prompt(ctx, "go")
+		done <- err
+	}()
+	time.Sleep(100 * time.Millisecond) // let the update drain + deliver
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	close(promptReturned)
+	if !sawLive {
+		t.Fatal("no live update delivered before Prompt returned")
+	}
+}
+
 func TestSessionPromptRejectsConcurrentPrompt(t *testing.T) {
 	h := newHarness(t, ClientHandlers{})
 	block := make(chan struct{})
@@ -277,14 +335,18 @@ func TestSessionCancelNotification(t *testing.T) {
 }
 
 func TestPromptResponseDecoding(t *testing.T) {
-	if _, err := decodePromptResponse(map[string]any{"stopReason": StopReasonEndTurn}); err != nil {
+	if _, err := decodePromptResponse(map[string]any{"stopReason": StopReasonEndTurn}, nil); err != nil {
 		t.Errorf("valid response: %v", err)
 	}
-	if _, err := decodePromptResponse(map[string]any{}); err == nil {
+	if _, err := decodePromptResponse(map[string]any{}, nil); err == nil {
 		t.Error("missing stopReason: want error")
 	}
-	if _, err := decodePromptResponse("nope"); err == nil {
+	if _, err := decodePromptResponse("nope", nil); err == nil {
 		t.Error("non-object result: want error")
+	}
+	// request error passes through unchanged
+	if _, err := decodePromptResponse(nil, context.Canceled); err == nil {
+		t.Error("request error: want error")
 	}
 }
 

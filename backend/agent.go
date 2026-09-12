@@ -35,12 +35,39 @@ const (
 // before it is answered as cancelled.
 const acpPermissionTimeout = 60 * time.Second
 
+// acpMaxFileBytes caps agent fs reads: anything larger is rejected to keep
+// context windows and memory bounded.
+const acpMaxFileBytes = 10 << 20 // 10MB
+
 // acpPrompter is the seam over acp.Session the facade drives (swap for fakes
 // in tests).
 type acpPrompter interface {
 	Prompt(ctx context.Context, text string) (acp.PromptResponse, error)
 	Close() error
 	SetOnUpdate(func(acp.SessionUpdate))
+}
+
+// acpStderrRing extracts the child's stderr ring buffer for error diagnostics
+// (*acp.Session backs one via its conn; fakes may not).
+type acpStderrRing interface {
+	Stderr() string
+}
+
+// acpStderrTailCap bounds the stderr tail appended to error surfaces.
+const acpStderrTailCap = 800
+
+// stderrTail returns up to acpStderrTailCap trailing characters of the child
+// agent's stderr; empty when the prompter does not back a ring.
+func stderrTail(s acpPrompter) string {
+	ring, ok := s.(acpStderrRing)
+	if !ok {
+		return ""
+	}
+	out := ring.Stderr()
+	if len(out) > acpStderrTailCap {
+		out = out[len(out)-acpStderrTailCap:]
+	}
+	return out
 }
 
 // sessionPrompter adapts *acp.Session to acpPrompter.
@@ -53,6 +80,7 @@ func (p *sessionPrompter) Close() error { return p.s.Close() }
 func (p *sessionPrompter) SetOnUpdate(f func(acp.SessionUpdate)) {
 	p.s.OnUpdate = f
 }
+func (p *sessionPrompter) Stderr() string { return p.s.ConnStderr() }
 
 // acpStartSession spawns an ACP session; swapped out in tests.
 var acpStartSession = func(ctx context.Context, root string, profile acp.Info, handlers acp.ClientHandlers) (acpPrompter, error) {
@@ -73,16 +101,18 @@ type acpPermissionChoice struct {
 // harness profile it was started with, pending permission requests and the
 // in-flight prompt turn accumulator.
 type agentSession struct {
-	mu      sync.Mutex
-	session acpPrompter
-	harness acp.Info
-	root    string
-	pending map[string]chan acpPermissionChoice
-	nextID  int
+	mu       sync.Mutex
+	session  acpPrompter
+	harness  acp.Info
+	root     string
+	pending  map[string]chan acpPermissionChoice
+	nextID   int
+	starting bool // start in flight; guards double-spawn (double-click)
 
-	turnMu   sync.Mutex
-	turnText strings.Builder
-	turnSeen map[string]bool
+	turnMu    sync.Mutex
+	turnText  strings.Builder
+	turnSeen  map[string]bool
+	titleless map[string]bool // tool ids recorded before any title arrived
 }
 
 func (ag *agentSession) get() acpPrompter {
@@ -97,24 +127,70 @@ func (ag *agentSession) setSession(s acpPrompter) {
 	ag.mu.Unlock()
 }
 
+// claimStart claims the right to spawn under a.mu (must be held). It returns
+// the agent stub and whether the caller should proceed: ok=false means a start
+// is already in flight or a session is running (double-click back-off);
+// otherwise a fresh stub is created, or a dead stub left by a failed start is
+// reused. Failed starts clear the flag via finishStart, so retry works.
+func (a *App) claimStart(projectID string, profile acp.Info, root string) (*agentSession, bool) {
+	if cur, ok := a.agents[projectID]; ok {
+		cur.mu.Lock()
+		defer cur.mu.Unlock()
+		if cur.starting || cur.session != nil {
+			return cur, false
+		}
+		// dead stub from a failed previous start: reuse it
+		cur.starting = true
+		cur.harness = profile
+		cur.root = root
+		return cur, true
+	}
+	ag := &agentSession{root: root, harness: profile, pending: map[string]chan acpPermissionChoice{}, starting: true}
+	a.agents[projectID] = ag
+	return ag, true
+}
+
+// finishStart clears the starting flag after a spawn attempt.
+func (ag *agentSession) finishStart() {
+	ag.mu.Lock()
+	ag.starting = false
+	ag.mu.Unlock()
+}
+
 func (ag *agentSession) appendTurn(text string) {
 	ag.turnMu.Lock()
 	ag.turnText.WriteString(text)
 	ag.turnMu.Unlock()
 }
 
-// noteTool records a tool call id and reports whether it was new (used to
-// persist each tool call once).
-func (ag *agentSession) noteTool(id string) bool {
+// noteTool records a tool call id and title. It reports whether the entry
+// should be persisted: on first sight of the id (persist if the title is
+// already known), or later when a title first arrives for a previously
+// titleless call (first-title-later pattern — the tool entry is not lost just
+// because the initial tool_call carried no title).
+func (ag *agentSession) noteTool(id, title string) bool {
 	ag.turnMu.Lock()
 	defer ag.turnMu.Unlock()
 	if ag.turnSeen == nil {
 		ag.turnSeen = map[string]bool{}
 	}
 	if ag.turnSeen[id] {
+		// already recorded; only re-persist if we skipped a titleless call and
+		// the title just arrived (once — then the titleless marker is cleared)
+		if title != "" && ag.titleless[id] {
+			delete(ag.titleless, id)
+			return true
+		}
 		return false
 	}
 	ag.turnSeen[id] = true
+	if title == "" {
+		if ag.titleless == nil {
+			ag.titleless = map[string]bool{}
+		}
+		ag.titleless[id] = true
+		return false
+	}
 	return true
 }
 
@@ -122,6 +198,7 @@ func (ag *agentSession) resetTurn() {
 	ag.turnMu.Lock()
 	ag.turnText.Reset()
 	ag.turnSeen = map[string]bool{}
+	ag.titleless = map[string]bool{}
 	ag.turnMu.Unlock()
 }
 
@@ -155,58 +232,21 @@ func (a *App) acpStartProfile(projectID string, profile acp.Info) error {
 		return err
 	}
 
+	// Idempotent start: claim under a.mu so a double-click (concurrent
+	// ACPStart) cannot double-spawn; the loser re-shows the transcript.
 	a.mu.Lock()
-	if cur, ok := a.agents[projectID]; ok && cur.get() != nil {
-		// already running: idempotent, just re-show the transcript
-		a.mu.Unlock()
+	ag, claimed := a.claimStart(projectID, profile, root)
+	a.mu.Unlock()
+	if !claimed {
+		// already running or a start is in flight: idempotent, just re-show
+		// the transcript
 		a.emitTranscript(projectID)
 		return nil
 	}
-	ag := &agentSession{root: root, harness: profile, pending: map[string]chan acpPermissionChoice{}}
-	a.agents[projectID] = ag
-	a.mu.Unlock()
-
-	s, err := acpStartSession(context.Background(), root, profile, acp.ClientHandlers{
-		ReadTextFile: func(_, path string) (string, error) {
-			p, cerr := containedPath(root, path)
-			if cerr != nil {
-				return "", cerr
-			}
-			b, rerr := os.ReadFile(p)
-			if rerr != nil {
-				return "", fmt.Errorf("acp: read %s: %w", path, rerr)
-			}
-			return string(b), nil
-		},
-		WriteTextFile: func(_, path, content string) error {
-			p, cerr := containedPath(root, path)
-			if cerr != nil {
-				return cerr
-			}
-			if derr := os.MkdirAll(filepath.Dir(p), 0o755); derr != nil {
-				return fmt.Errorf("acp: mkdir %s: %w", filepath.Dir(p), derr)
-			}
-			if werr := os.WriteFile(p, []byte(content), 0o644); werr != nil {
-				return fmt.Errorf("acp: write %s: %w", path, werr)
-			}
-			return nil
-		},
-		RequestPermission: func(params map[string]any) (any, error) {
-			return a.acpRequestPermission(projectID, ag, params)
-		},
-	})
-	if err != nil {
-		a.mu.Lock()
-		delete(a.agents, projectID)
-		a.mu.Unlock()
-		a.emitState(projectID, AgentStateHarnessDown)
-		return err
-	}
-	s.SetOnUpdate(a.acpUpdateHandler(projectID, ag))
-	ag.setSession(s)
-	a.emitTranscript(projectID)
-	a.emitState(projectID, AgentStateIdle)
-	return nil
+	// clear the flag on every exit path; failed start leaves a dead stub the
+	// next claimStart reuses
+	defer ag.finishStart()
+	return a.acpSpawnOnAgent(projectID, ag, profile)
 }
 
 // ACPSendPrompt runs one synchronous prompt turn: the user entry is persisted
@@ -236,8 +276,13 @@ func (a *App) ACPSendPrompt(projectID, text string) error {
 	}
 	if err != nil {
 		// surface the failure in the chat; the conn is typically dead after
-		// this (agent crashed / stream closed)
-		a.sink.Emit(EventACPMsg, map[string]any{"projectId": projectID, "role": "agent", "text": err.Error(), "kind": "error"})
+		// this (agent crashed / stream closed). Include the stderr tail for
+		// diagnostics.
+		msg := err.Error()
+		if tail := stderrTail(s); tail != "" {
+			msg += "\n[agent stderr] " + tail
+		}
+		a.sink.Emit(EventACPMsg, map[string]any{"projectId": projectID, "role": "agent", "text": msg, "kind": "error"})
 		a.emitState(projectID, AgentStateIdle)
 		return nil
 	}
@@ -265,20 +310,112 @@ func (a *App) ACPRespondPermission(projectID, requestID, optionID string, cancel
 // ACPNewSession closes the current harness connection and spawns a fresh
 // session with the same harness. The transcript is kept; a divider note entry
 // marks the boundary.
+//
+// Get + close + spawn are serialized under a.mu together with claimStart, so a
+// concurrent ACPStart / ACPStop cannot interleave: the closed session is never
+// resurrected by a stale-closed send, and only one spawn is in flight.
 func (a *App) ACPNewSession(projectID string) error {
-	ag := a.agentFor(projectID)
-	if ag == nil || ag.get() == nil {
+	a.mu.Lock()
+	ag, ok := a.agents[projectID]
+	if !ok || ag == nil {
+		a.mu.Unlock()
+		return errors.New("acp: no running harness for project")
+	}
+	ag.mu.Lock()
+	s := ag.session
+	if s == nil {
+		ag.mu.Unlock()
+		a.mu.Unlock()
 		return errors.New("acp: no running harness for project")
 	}
 	harness := ag.harness
-	if s := ag.get(); s != nil {
-		_ = s.Close()
-	}
-	ag.setSession(nil)
+	ag.session = nil
+	ag.mu.Unlock()
+	// old conn is closed while a.mu is held; the new session claims the stub
+	// directly (bypassing the starting-flag back-off, since we hold the slot)
+	_ = s.Close()
 	if err := a.chats.Append(projectID, agentstore.Entry{Role: "system", Kind: agentstore.KindText, Text: "— new session —"}); err != nil {
+		a.mu.Unlock()
 		return fmt.Errorf("acp: persist session divider: %w", err)
 	}
-	return a.acpStartProfile(projectID, harness)
+	ag.mu.Lock()
+	ag.starting = true
+	ag.mu.Unlock()
+	a.mu.Unlock()
+
+	defer ag.finishStart()
+	return a.acpSpawnOnAgent(projectID, ag, harness)
+}
+
+// acpSpawnOnAgent spawns a session for an existing (claimed) agentSession
+// stub; shared by acpStartProfile and ACPNewSession.
+func (a *App) acpSpawnOnAgent(projectID string, ag *agentSession, profile acp.Info) error {
+	root, err := a.resolveRoot(projectID)
+	if err != nil {
+		return err
+	}
+	ag.mu.Lock()
+	ag.root = root
+	ag.harness = profile
+	ag.mu.Unlock()
+
+	s, err := acpStartSession(context.Background(), root, profile, acp.ClientHandlers{
+		ReadTextFile: func(_, path string) (string, error) {
+			p, cerr := containedPath(root, path)
+			if cerr != nil {
+				return "", cerr
+			}
+			info, serr := os.Stat(p)
+			if serr != nil {
+				return "", fmt.Errorf("acp: stat %s: %w", path, serr)
+			}
+			if info.Size() > acpMaxFileBytes {
+				return "", fmt.Errorf("acp: read %s: file exceeds %d byte cap", path, acpMaxFileBytes)
+			}
+			b, rerr := os.ReadFile(p)
+			if rerr != nil {
+				return "", fmt.Errorf("acp: read %s: %w", path, rerr)
+			}
+			return string(b), nil
+		},
+		// WriteTextFile is gated: every agent fs/write_text_file surfaces a
+		// synchronous permission card to the user (same routing as
+		// session/request_permission) before any byte is written. Deny, or no
+		// answer within acpPermissionTimeout, rejects the write.
+		WriteTextFile: func(_, path, content string) error {
+			p, cerr := containedPath(root, path)
+			if cerr != nil {
+				return cerr
+			}
+			choice, perr := a.acpFsWritePermission(projectID, ag, path)
+			if perr != nil {
+				return perr
+			}
+			if !choice {
+				return fmt.Errorf("acp: write to %s denied by user", path)
+			}
+			if derr := os.MkdirAll(filepath.Dir(p), 0o755); derr != nil {
+				return fmt.Errorf("acp: mkdir %s: %w", filepath.Dir(p), derr)
+			}
+			if werr := os.WriteFile(p, []byte(content), 0o644); werr != nil {
+				return fmt.Errorf("acp: write %s: %w", path, werr)
+			}
+			return nil
+		},
+		RequestPermission: func(params map[string]any) (any, error) {
+			return a.acpRequestPermission(projectID, ag, params)
+		},
+	})
+	if err != nil {
+		ag.setSession(nil)
+		a.emitState(projectID, AgentStateHarnessDown)
+		return err
+	}
+	s.SetOnUpdate(a.acpUpdateHandler(projectID, ag))
+	ag.setSession(s)
+	a.emitTranscript(projectID)
+	a.emitState(projectID, AgentStateIdle)
+	return nil
 }
 
 // ACPStop closes the harness connection (terminating the child process) and
@@ -342,6 +479,46 @@ func (a *App) acpRequestPermission(projectID string, ag *agentSession, params ma
 	}
 }
 
+// acpFsWritePermission gates an agent fs/write_text_file request: it registers
+// a pending permission under the same routing as session/request_permission,
+// emits acp.permission with purpose=fs-write plus the target path, and blocks
+// for the user's answer (or the timeout, which denies). Returns true only for
+// an explicit allow.
+func (a *App) acpFsWritePermission(projectID string, ag *agentSession, path string) (bool, error) {
+	ag.mu.Lock()
+	ag.nextID++
+	id := fmt.Sprintf("perm-%d", ag.nextID)
+	ch := make(chan acpPermissionChoice, 1)
+	ag.pending[id] = ch
+	ag.mu.Unlock()
+	defer func() {
+		ag.mu.Lock()
+		delete(ag.pending, id)
+		ag.mu.Unlock()
+	}()
+
+	a.sink.Emit(EventACPPermission, map[string]any{
+		"projectId": projectID,
+		"requestId": id,
+		"purpose":   "fs-write",
+		"path":      path,
+		"options": []any{
+			map[string]any{"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+			map[string]any{"optionId": "deny", "name": "Deny", "kind": "reject_once"},
+		},
+	})
+
+	select {
+	case c := <-ch:
+		if c.cancel {
+			return false, nil
+		}
+		return c.optionID == "allow", nil
+	case <-time.After(acpPermissionTimeout):
+		return false, nil
+	}
+}
+
 // acpUpdateHandler translates session/update notifications into UI events and
 // transcript persistence for the open prompt turn.
 func (a *App) acpUpdateHandler(projectID string, ag *agentSession) func(acp.SessionUpdate) {
@@ -369,7 +546,7 @@ func (a *App) acpUpdateHandler(projectID string, ag *agentSession) func(acp.Sess
 			if id == "" {
 				return
 			}
-			if ag.noteTool(id) && title != "" {
+			if ag.noteTool(id, title) {
 				_ = a.chats.Append(projectID, agentstore.Entry{
 					Role: "agent", Kind: agentstore.KindTool, Text: title, ToolID: id,
 				})
@@ -395,24 +572,60 @@ func (a *App) emitState(projectID, state string) {
 }
 
 // containedPath resolves path for agent fs access, refusing anything outside
-// the project root (path traversal guard).
+// the project root. Both the root and the path are symlink-resolved
+// (EvalSymlinks) BEFORE the containment check, so a symlink inside the root
+// pointing outside it is rejected. For not-yet-existing paths (write targets)
+// the deepest existing ancestor is resolved and the remaining tail is joined
+// lexically; a missing path under a resolvable ancestor is accepted.
 func containedPath(root, path string) (string, error) {
 	if root == "" {
 		return "", errors.New("acp: no project root for fs access")
-	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return "", fmt.Errorf("acp: path %q: %w", path, err)
 	}
 	rootAbs, err := filepath.Abs(root)
 	if err != nil {
 		return "", fmt.Errorf("acp: root %q: %w", root, err)
 	}
-	rel, err := filepath.Rel(rootAbs, abs)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("acp: path %q is outside the project root", path)
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("acp: path %q: %w", path, err)
 	}
-	return abs, nil
+	// NOTE: no lexical check here — root and path may address the same tree
+	// through different aliases (macOS /var vs /private/var), and filepath.Abs
+	// already cleans `..`; the resolved containment below is authoritative.
+	rootReal, err := filepath.EvalSymlinks(rootAbs)
+	if err != nil {
+		return "", fmt.Errorf("acp: root %q: %w", root, err)
+	}
+	// Resolve symlinks on the deepest existing ancestor; missing tails (write
+	// targets) are joined back lexically.
+	targetReal, err := evalExisting(abs)
+	if err != nil {
+		return "", fmt.Errorf("acp: resolve %q: %w", path, err)
+	}
+	relReal, err := filepath.Rel(rootReal, targetReal)
+	if err != nil || relReal == ".." || strings.HasPrefix(relReal, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("acp: path %q resolves outside the project root", path)
+	}
+	return targetReal, nil
+}
+
+// evalExisting symlink-resolves the longest prefix of p that exists and joins
+// the unresolved remainder (which contains no symlink components by
+// definition, since those components do not exist yet).
+func evalExisting(p string) (string, error) {
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved, nil
+	}
+	dir := filepath.Dir(p)
+	if dir == p {
+		return "", errors.New("acp: reached filesystem root without resolution")
+	}
+	base := filepath.Base(p)
+	parent, err := evalExisting(dir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(parent, base), nil
 }
 
 // toolContentText joins the text content blocks of a tool call update.

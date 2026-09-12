@@ -115,6 +115,67 @@ func TestSessionUpdateToolCallVariantWire(t *testing.T) {
 	}
 }
 
+// ContentItems shares the `content` wire key with Content; the array form is
+// the tool_call/tool_call_update shape (v1 schema).
+func TestSessionUpdateToolCallContentItemsWire(t *testing.T) {
+	upd := SessionUpdate{
+		SessionUpdate: UpdateToolCallUpdate,
+		ID:            "sess-1",
+		ToolCallID:    "call-1",
+		Status:        ToolStatusCompleted,
+		ContentItems: []ContentBlock{
+			{Type: BlockTypeText, Text: "output line"},
+		},
+	}
+	b, err := json.Marshal(upd)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	content, ok := m["content"].([]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("content = %v, want one-element array", m["content"])
+	}
+	blk, _ := content[0].(map[string]any)
+	if blk["type"] != "text" || blk["text"] != "output line" {
+		t.Errorf("content block = %v", blk)
+	}
+	if m["toolCall"] != nil {
+		t.Errorf("tool_call_update must not carry nested toolCall: %v", m)
+	}
+
+	// round-trip: array form decodes back into ContentItems
+	var back SessionUpdate
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatalf("roundtrip unmarshal: %v", err)
+	}
+	if len(back.ContentItems) != 1 || back.ContentItems[0].Text != "output line" {
+		t.Fatalf("roundtrip ContentItems = %#v", back.ContentItems)
+	}
+	if back.Content != nil {
+		t.Fatalf("roundtrip Content = %#v, want nil", back.Content)
+	}
+}
+
+func TestSessionUpdateUnmarshalContentObjectForm(t *testing.T) {
+	// decodeSessionUpdate unwraps the v1 nested {update:{...}} wrapper before
+	// unmarshal, so decode the inner object here.
+	raw := []byte(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"}}`)
+	var u SessionUpdate
+	if err := json.Unmarshal(raw, &u); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if u.Content == nil || u.Content.Text != "hi" {
+		t.Fatalf("Content = %#v, want {text:hi}", u.Content)
+	}
+	if u.ContentItems != nil {
+		t.Fatalf("ContentItems = %#v, want nil", u.ContentItems)
+	}
+}
+
 func TestToolCallNestedForPermissionWire(t *testing.T) {
 	tc := ToolCall{
 		ID:     "call-1",

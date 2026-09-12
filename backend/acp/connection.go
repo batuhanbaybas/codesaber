@@ -18,6 +18,11 @@ const (
 	RPCInternalError   = -32000
 	closeWaitTimeout   = 2 * time.Second
 	stderrRingCapacity = 4096
+	// notifyBuffer caps the Notify chan; when full, new notifications are
+	// dropped (drop-new policy) rather than blocking readLoop. MVP trade-off:
+	// the session client drains Notify continuously during prompt turns, so
+	// overflow only occurs under pathological bursts.
+	notifyBuffer = 64
 )
 
 // Error implements the error interface so RPCError can be unwrapped from
@@ -63,6 +68,10 @@ type Conn struct {
 	stderrMu  sync.Mutex
 	stderrBuf []byte
 
+	// droppedNotifies counts session/update notifications discarded by the
+	// drop-on-full Notify policy (diagnostics only; read racily).
+	droppedNotifies atomic.Uint64
+
 	closed atomic.Bool
 }
 
@@ -74,7 +83,7 @@ func newConnFromPipes(stdout io.Reader, stdin io.WriteCloser, handlers ClientHan
 		stdin:    stdin,
 		reqs:     make(map[uint64]chan Frame),
 		handlers: handlers,
-		Notify:   make(chan Frame, 64),
+		Notify:   make(chan Frame, notifyBuffer),
 	}
 	go c.readLoop()
 	return c
@@ -176,6 +185,10 @@ func (c *Conn) Stderr() string {
 	return string(c.stderrBuf)
 }
 
+// DroppedNotifies reports how many notifications were discarded because the
+// Notify buffer was full (drop-on-full policy keeps readLoop unblocked).
+func (c *Conn) DroppedNotifies() uint64 { return c.droppedNotifies.Load() }
+
 func (c *Conn) writeLine(f Frame) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
@@ -225,11 +238,21 @@ func (c *Conn) dispatch(f Frame) {
 			}
 		}
 	case f.Method != "" && f.ID != nil:
-		// agent->client request: invoke handler, write response back
-		c.handleAgentRequest(f)
+		// agent->client request: handled off the read loop so a slow or
+		// blocking handler (e.g. a permission prompt awaiting the user) never
+		// stalls reading of responses and session/update notifications. The
+		// goroutine is unbounded for MVP; request handlers are short-lived
+		// (fs access, permission prompts bounded by acpPermissionTimeout).
+		// Responses are serialized through writeMu in writeLine.
+		go c.handleAgentRequest(f)
 	case f.Method != "":
-		// notification for the session client layer
-		c.Notify <- f
+		// notification for the session client layer; drop-on-full so readLoop
+		// never blocks (see notifyBuffer).
+		select {
+		case c.Notify <- f:
+		default:
+			c.droppedNotifies.Add(1)
+		}
 	}
 }
 

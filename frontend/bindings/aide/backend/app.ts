@@ -47,6 +47,10 @@ export function ACPLoadTranscript(projectID: string): $CancellablePromise<agents
  * ACPNewSession closes the current harness connection and spawns a fresh
  * session with the same harness. The transcript is kept; a divider note entry
  * marks the boundary.
+ * 
+ * Get + close + spawn are serialized under a.mu together with claimStart, so a
+ * concurrent ACPStart / ACPStop cannot interleave: the closed session is never
+ * resurrected by a stale-closed send, and only one spawn is in flight.
  */
 export function ACPNewSession(projectID: string): $CancellablePromise<void> {
     return $Call.ByID(1433866094, projectID);

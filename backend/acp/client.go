@@ -92,9 +92,22 @@ func startSessionOnConn(ctx context.Context, conn *Conn, root string, handlers C
 // ID returns the agent-assigned session id.
 func (s *Session) ID() string { return s.id }
 
+// ConnStderr returns the child agent's most recent stderr output (ring buffer)
+// for error diagnostics; empty when backed by a pipe-less test conn.
+func (s *Session) ConnStderr() string {
+	if s.conn == nil {
+		return ""
+	}
+	return s.conn.Stderr()
+}
+
 // Prompt sends one turn and blocks until the agent answers with a stop
-// reason. session/update notifications that arrive while the turn is open
-// are decoded and surfaced through OnUpdate, in order, before Prompt returns.
+// reason. session/update notifications are delivered to OnUpdate LIVE as they
+// are drained, not batched after the response: the drain goroutine calls
+// OnUpdate directly as each frame arrives. Ordering per-turn is kept by
+// delivering every update from the ONE drain goroutine; notifications already
+// buffered (or racing the response) are drained after the response and
+// delivered in order before Prompt returns.
 func (s *Session) Prompt(ctx context.Context, text string) (PromptResponse, error) {
 	s.promptMu.Lock()
 	if s.promptOpen {
@@ -110,7 +123,6 @@ func (s *Session) Prompt(ctx context.Context, text string) (PromptResponse, erro
 	}()
 
 	done := make(chan struct{})
-	var drained []SessionUpdate
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -121,8 +133,9 @@ func (s *Session) Prompt(ctx context.Context, text string) (PromptResponse, erro
 				if f.Method != MethodSessionUpdate || s.OnUpdate == nil {
 					continue
 				}
+				// deliver live, in arrival order, from this single goroutine
 				if upd, ok := decodeSessionUpdate(f.Params); ok {
-					drained = append(drained, upd)
+					s.OnUpdate(upd)
 				}
 			case <-done:
 				return
@@ -133,7 +146,10 @@ func (s *Session) Prompt(ctx context.Context, text string) (PromptResponse, erro
 	res, err := s.conn.Request(ctx, MethodSessionPrompt, NewPromptParams(s.id, []PromptItem{{Type: BlockTypeText, Text: text}}))
 	close(done)
 	wg.Wait()
-	// Trailing notifications already queued when the goroutine exited.
+	// Trailing notifications already queued when the goroutine exited: drain
+	// them here (post-response) and deliver in order, on the caller's
+	// goroutine — no other consumer may deliver concurrently because the
+	// drain goroutine has terminated and prompt turns are serialized.
 	for {
 		select {
 		case f := <-s.conn.Notify:
@@ -141,20 +157,12 @@ func (s *Session) Prompt(ctx context.Context, text string) (PromptResponse, erro
 				continue
 			}
 			if upd, ok := decodeSessionUpdate(f.Params); ok {
-				drained = append(drained, upd)
+				s.OnUpdate(upd)
 			}
 		default:
-			goto deliverUpdates
+			return decodePromptResponse(res, err)
 		}
 	}
-deliverUpdates:
-	for _, upd := range drained {
-		s.OnUpdate(upd)
-	}
-	if err != nil {
-		return PromptResponse{}, err
-	}
-	return decodePromptResponse(res)
 }
 
 // Cancel sends the session/cancel notification for an in-flight turn.
@@ -165,7 +173,12 @@ func (s *Session) Cancel() error {
 // Close terminates the agent process.
 func (s *Session) Close() error { return s.conn.Close() }
 
-func decodePromptResponse(res any) (PromptResponse, error) {
+// decodePromptResponse interprets the session/prompt result. A nil err with a
+// nil res means the request itself failed (err carries the reason).
+func decodePromptResponse(res any, err error) (PromptResponse, error) {
+	if err != nil {
+		return PromptResponse{}, err
+	}
 	m, _ := res.(map[string]any)
 	if m == nil {
 		return PromptResponse{}, errors.New("acp: session/prompt returned non-object result")

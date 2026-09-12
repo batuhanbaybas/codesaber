@@ -3,7 +3,6 @@ import React, {
   useCallback,
   useContext,
   useEffect,
-  useRef,
   useState,
 } from 'react'
 import { Events } from '@wailsio/runtime'
@@ -32,6 +31,8 @@ export interface ToolCard {
 export interface PendingPermission {
   requestId: string
   options: PermissionOption[]
+  purpose?: string
+  path?: string
 }
 
 export interface PermissionOption {
@@ -45,7 +46,7 @@ interface AgentProjectState {
   status: AgentState
   messages: ChatMessage[]
   tools: ToolCard[]
-  pendingPermission: PendingPermission | null
+  pendingPermissions: PendingPermission[]
   harness: string | null
 }
 
@@ -68,7 +69,7 @@ const emptyState: AgentProjectState = {
   status: 'no-harness',
   messages: [],
   tools: [],
-  pendingPermission: null,
+  pendingPermissions: [],
   harness: null,
 }
 
@@ -109,8 +110,6 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({
 }) => {
   const [state, setState] = useState<Record<string, AgentProjectState>>({})
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([])
-  const stateRef = useRef(state)
-  stateRef.current = state
 
   const patch = useCallback(
     (projectId: string, fn: (s: AgentProjectState) => AgentProjectState) => {
@@ -134,10 +133,15 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({
       }
       if (!projectId || !text) return
       patch(projectId, (s) => {
-        // chunk: append to the tail agent message if one is streaming
-        if (kind === 'chunk' && s.messages.length > 0) {
-          const tail = s.messages[s.messages.length - 1]
-          if (tail.role === 'agent' && tail.kind === 'chunk') {
+        // Chunk merge invariant: the backend streams an agent reply as
+        // kind:'chunk' events. The FIRST chunk must create a message with
+        // kind 'chunk'; every subsequent chunk appends to that tail message
+        // (agent role + kind 'chunk'). A chunk must never fall through to the
+        // "create message" branch while a chunk tail exists, or the reply
+        // splits into multiple bubbles.
+        const tail = s.messages[s.messages.length - 1]
+        if (kind === 'chunk') {
+          if (tail && tail.role === 'agent' && tail.kind === 'chunk') {
             return {
               ...s,
               messages: [
@@ -145,6 +149,13 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({
                 { ...tail, text: tail.text + text },
               ],
             }
+          }
+          return {
+            ...s,
+            messages: [
+              ...s.messages,
+              { id: nextId(), role: 'agent', text, kind: 'chunk' },
+            ],
           }
         }
         const msgRole: ChatMessage['role'] =
@@ -184,10 +195,12 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({
       })
     })
     const onPermission = Events.On('acp.permission', (ev: any) => {
-      const { projectId, requestId, options } = (ev.data ?? {}) as {
+      const { projectId, requestId, options, purpose, path } = (ev.data ?? {}) as {
         projectId?: string
         requestId?: string
         options?: unknown
+        purpose?: string
+        path?: string
       }
       if (!projectId || !requestId) return
       const opts = Array.isArray(options)
@@ -195,7 +208,12 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({
         : []
       patch(projectId, (s) => ({
         ...s,
-        pendingPermission: { requestId, options: opts },
+        // stacked permissions: append; duplicates (same requestId) ignored
+        pendingPermissions: s.pendingPermissions.some(
+          (p) => p.requestId === requestId,
+        )
+          ? s.pendingPermissions
+          : [...s.pendingPermissions, { requestId, options: opts, purpose, path }],
       }))
     })
     const onState = Events.On('acp.state', (ev: any) => {
@@ -207,8 +225,9 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({
       patch(projectId, (s) => ({
         ...s,
         status: st,
-        // permission resolved or timed out server-side; clear on state change
-        pendingPermission: st === 'thinking' ? s.pendingPermission : null,
+        // a state flip means the turn ended/timed out server-side; drop the
+        // whole stack (the backend answers every pending request on timeout)
+        pendingPermissions: st === 'thinking' ? s.pendingPermissions : [],
       }))
     })
     const onTranscript = Events.On('acp.transcript', (ev: any) => {
@@ -289,8 +308,11 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({
   const newSession = useCallback(
     async (projectId: string) => {
       await App.ACPNewSession(projectId)
+      // backend emits acp.transcript (reset marker) on respawn; also clear
+      // live-streamed tools locally in case the event races
+      patch(projectId, (s) => ({ ...s, tools: [] }))
     },
-    [],
+    [patch],
   )
 
   const respondPermission = useCallback(
@@ -301,7 +323,13 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({
       cancel: boolean,
     ) => {
       await App.ACPRespondPermission(projectId, requestId, optionId, cancel)
-      patch(projectId, (s) => ({ ...s, pendingPermission: null }))
+      // resolve only the matching card, not the whole stack
+      patch(projectId, (s) => ({
+        ...s,
+        pendingPermissions: s.pendingPermissions.filter(
+          (p) => p.requestId !== requestId,
+        ),
+      }))
     },
     [patch],
   )

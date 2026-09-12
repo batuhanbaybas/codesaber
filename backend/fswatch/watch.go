@@ -14,7 +14,7 @@ type Event struct {
 }
 
 type Watcher struct {
-	w     *fsnotify.Watcher
+	w      *fsnotify.Watcher
 	events chan Event
 	done   chan struct{}
 
@@ -47,9 +47,9 @@ func New(root string) (*Watcher, error) {
 		}
 	}
 	watcher := &Watcher{
-		w:     w,
-		events:   make(chan Event, 64),
-		done:     make(chan struct{}),
+		w:      w,
+		events: make(chan Event, 64),
+		done:   make(chan struct{}),
 	}
 	go watcher.forward()
 	return watcher, nil

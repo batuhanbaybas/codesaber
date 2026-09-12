@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -101,6 +102,56 @@ func TestACPStartEmitsTranscriptAndState(t *testing.T) {
 	sm := st.payload.(map[string]any)
 	if sm["state"] != AgentStateIdle {
 		t.Errorf("state = %v, want idle", sm["state"])
+	}
+}
+
+// TestACPStartIdempotent verifies a double ACPStart does not double-spawn:
+// the second call backs off and only the first fake session stays alive.
+func TestACPStartIdempotent(t *testing.T) {
+	app, _, pid := newAgentTestApp(t)
+	fp1 := &fakePrompter{}
+	var spawnCount int
+	prev := acpStartSession
+	acpStartSession = func(ctx context.Context, root string, profile acp.Info, handlers acp.ClientHandlers) (acpPrompter, error) {
+		spawnCount++
+		return fp1, nil
+	}
+	t.Cleanup(func() { acpStartSession = prev })
+
+	if err := app.ACPStart(pid, "opencode"); err != nil {
+		t.Fatalf("first ACPStart: %v", err)
+	}
+	if err := app.ACPStart(pid, "opencode"); err != nil {
+		t.Fatalf("second ACPStart: %v", err)
+	}
+	if spawnCount != 1 {
+		t.Fatalf("spawn count = %d, want 1 (double start must not re-spawn)", spawnCount)
+	}
+}
+
+// TestACPStartRetryAfterFailure verifies a failed start clears its claim so a
+// subsequent start can spawn again.
+func TestACPStartRetryAfterFailure(t *testing.T) {
+	app, _, pid := newAgentTestApp(t)
+	var spawnCount int
+	prev := acpStartSession
+	acpStartSession = func(ctx context.Context, root string, profile acp.Info, handlers acp.ClientHandlers) (acpPrompter, error) {
+		spawnCount++
+		if spawnCount == 1 {
+			return nil, errors.New("spawn failed")
+		}
+		return &fakePrompter{}, nil
+	}
+	t.Cleanup(func() { acpStartSession = prev })
+
+	if err := app.ACPStart(pid, "opencode"); err == nil {
+		t.Fatal("want error from failed first start")
+	}
+	if err := app.ACPStart(pid, "opencode"); err != nil {
+		t.Fatalf("retry after failure: %v", err)
+	}
+	if spawnCount != 2 {
+		t.Fatalf("spawn count = %d, want 2", spawnCount)
 	}
 }
 
@@ -365,8 +416,12 @@ func TestACPStartSpawnFailureReportsHarnessDown(t *testing.T) {
 
 func TestContainedPath(t *testing.T) {
 	root := t.TempDir()
+	rootReal, err := filepath.EvalSymlinks(root) // macOS /var -> /private/var
+	if err != nil {
+		t.Fatal(err)
+	}
 	p, err := containedPath(root, filepath.Join(root, "a", "b.txt"))
-	if err != nil || p != filepath.Join(root, "a", "b.txt") {
+	if err != nil || p != filepath.Join(rootReal, "a", "b.txt") {
 		t.Fatalf("containedPath inside = %v, %v", p, err)
 	}
 	if _, err := containedPath(root, "/etc/passwd"); err == nil {
@@ -377,6 +432,209 @@ func TestContainedPath(t *testing.T) {
 	}
 	if _, err := containedPath("", "x"); err == nil {
 		t.Error("want error for empty root")
+	}
+}
+
+// TestContainedPathSymlinkEscape verifies symlink-blind traversal is rejected:
+// a link inside the root pointing outside must not pass containment.
+func TestContainedPathSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := containedPath(root, filepath.Join(root, "link", "secret.txt")); err == nil {
+		t.Error("want error for symlink escape")
+	}
+	// existing file reached through the link is also rejected
+	victim := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(victim, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := containedPath(root, filepath.Join(root, "link", "secret.txt")); err == nil {
+		t.Error("want error for symlink escape to existing file")
+	}
+	// root itself addressed through a symlink still resolves inside
+	rootLink := filepath.Join(t.TempDir(), "rootlink")
+	if err := os.Symlink(root, rootLink); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := containedPath(rootLink, filepath.Join(rootLink, "ok.txt")); err != nil {
+		t.Errorf("root addressed via symlink rejected: %v", err)
+	}
+}
+
+// TestContainedPathMissingTailAcceptsWriteTargets verifies not-yet-existing
+// write targets resolve via their deepest existing ancestor.
+func TestContainedPathMissingTailAcceptsWriteTargets(t *testing.T) {
+	root := t.TempDir()
+	rootReal, err := filepath.EvalSymlinks(root) // macOS /var -> /private/var
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(rootReal, "newdir", "new.txt")
+	p, err := containedPath(root, target)
+	if err != nil {
+		t.Fatalf("write target rejected: %v", err)
+	}
+	if p != target {
+		t.Fatalf("resolved %q, want %q", p, target)
+	}
+}
+
+// TestACPReadRejectsOversizedFile verifies the 10MB read cap.
+func TestACPReadRejectsOversizedFile(t *testing.T) {
+	app, _, pid := newAgentTestApp(t)
+	fp := &fakePrompter{}
+	installFakeAgent(t, fp)
+	root, err := app.resolveRoot(pid)
+	if err != nil {
+		t.Fatalf("resolveRoot: %v", err)
+	}
+	big := filepath.Join(root, "big.txt")
+	if err := os.WriteFile(big, make([]byte, acpMaxFileBytes+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// capture the read handler registered at start
+	var readHandler func(sessionID, path string) (string, error)
+	prev := acpStartSession
+	acpStartSession = func(ctx context.Context, _ string, _ acp.Info, handlers acp.ClientHandlers) (acpPrompter, error) {
+		readHandler = handlers.ReadTextFile
+		return fp, nil
+	}
+	t.Cleanup(func() { acpStartSession = prev })
+	if err := app.ACPStart(pid, "opencode"); err != nil {
+		t.Fatalf("ACPStart: %v", err)
+	}
+	if readHandler == nil {
+		t.Fatal("read handler not captured")
+	}
+	if _, err := readHandler("s", big); err == nil {
+		t.Fatal("want error for oversized read")
+	}
+	small := filepath.Join(root, "small.txt")
+	if err := os.WriteFile(small, []byte("ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if c, err := readHandler("s", small); err != nil || c != "ok" {
+		t.Fatalf("small read = %q, %v", c, err)
+	}
+}
+
+// TestACPWriteGatedByPermission verifies fs/write_text_file only writes after
+// an explicit allow through the permission flow, and rejects otherwise.
+func TestACPWriteGatedByPermission(t *testing.T) {
+	app, sink, pid := newAgentTestApp(t)
+	fp := &fakePrompter{}
+	installFakeAgent(t, fp)
+	root, err := app.resolveRoot(pid)
+	if err != nil {
+		t.Fatalf("resolveRoot: %v", err)
+	}
+
+	var writeHandler func(sessionID, path, content string) error
+	prev := acpStartSession
+	acpStartSession = func(ctx context.Context, _ string, _ acp.Info, handlers acp.ClientHandlers) (acpPrompter, error) {
+		writeHandler = handlers.WriteTextFile
+		return fp, nil
+	}
+	t.Cleanup(func() { acpStartSession = prev })
+	if err := app.ACPStart(pid, "opencode"); err != nil {
+		t.Fatalf("ACPStart: %v", err)
+	}
+	if writeHandler == nil {
+		t.Fatal("write handler not captured")
+	}
+	target := filepath.Join(root, "gated.txt")
+
+	// deny: write must fail and no file appear
+	done := make(chan error, 1)
+	go func() { done <- writeHandler("s", target, "x") }()
+	ev := sink.waitFor(t, EventACPPermission, 2*time.Second)
+	m := ev.payload.(map[string]any)
+	if m["purpose"] != "fs-write" || m["path"] != target {
+		t.Fatalf("permission payload = %#v, want purpose=fs-write path=%s", m, target)
+	}
+	reqID := m["requestId"].(string)
+	if err := app.ACPRespondPermission(pid, reqID, "deny", false); err != nil {
+		t.Fatalf("respond deny: %v", err)
+	}
+	if err := <-done; err == nil {
+		t.Fatal("want error for denied write")
+	}
+	if _, serr := os.Stat(target); !os.IsNotExist(serr) {
+		t.Fatalf("denied write created file: %v", serr)
+	}
+
+	// allow: write succeeds
+	go func() { done <- writeHandler("s", target, "hello") }()
+	// skip past the drained perm-1 event; the second write re-raises a card
+	// under a fresh request id
+	var seen string
+	deadline := time.Now().Add(2 * time.Second)
+	for seen != "perm-2" {
+		if time.Now().After(deadline) {
+			t.Fatal("second permission event never arrived")
+		}
+		time.Sleep(10 * time.Millisecond)
+		for _, ev := range sink.snapshot() {
+			if ev.name != EventACPPermission {
+				continue
+			}
+			m := ev.payload.(map[string]any)
+			if id, _ := m["requestId"].(string); id != "" {
+				seen = id
+			}
+		}
+	}
+	if err := app.ACPRespondPermission(pid, seen, "allow", false); err != nil {
+		t.Fatalf("respond allow: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("allowed write: %v", err)
+	}
+	b, rerr := os.ReadFile(target)
+	if rerr != nil || string(b) != "hello" {
+		t.Fatalf("file = %q, %v", b, rerr)
+	}
+
+	// symlink escape blocked even with permission
+	if err := os.Symlink(t.TempDir(), filepath.Join(root, "esc")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeHandler("s", filepath.Join(root, "esc", "f.txt"), "x"); err == nil {
+		t.Fatal("want error for symlink escape write")
+	}
+}
+
+// TestNoteToolFirstTitleLater verifies the first-title-later pattern: a
+// tool_call with no title is not persisted until the title arrives, then
+// persisted exactly once.
+func TestNoteToolFirstTitleLater(t *testing.T) {
+	ag := &agentSession{}
+	if ag.noteTool("t-1", "") {
+		t.Fatal("titleless first sight must not persist")
+	}
+	if ag.noteTool("t-1", "") {
+		t.Fatal("repeat titleless sight must not persist")
+	}
+	if !ag.noteTool("t-1", "read file") {
+		t.Fatal("title arrival after titleless record must persist")
+	}
+	if ag.noteTool("t-1", "read file") {
+		t.Fatal("already-persisted tool must not re-persist")
+	}
+	// titled first sight persists immediately, once
+	if !ag.noteTool("t-2", "edit file") {
+		t.Fatal("titled first sight must persist")
+	}
+	if ag.noteTool("t-2", "edit file") {
+		t.Fatal("repeat titled sight must not re-persist")
+	}
+	ag.resetTurn()
+	if !ag.noteTool("t-1", "again") {
+		t.Fatal("resetTurn must clear the seen set")
 	}
 }
 
@@ -427,12 +685,37 @@ func TestACPPromptErrorSurfacedInChat(t *testing.T) {
 	}
 }
 
+// TestStderrTailCapsAndSkips verifies the stderr tail helper: capped length,
+// passthrough under the cap, and empty for prompters without a ring.
+func TestStderrTailCapsAndSkips(t *testing.T) {
+	if got := stderrTail(&fakePrompter{}); got != "" {
+		t.Errorf("stderrTail(fake) = %q, want empty", got)
+	}
+	big := &bigStderrPrompter{out: strings.Repeat("x", acpStderrTailCap+100)}
+	if got := stderrTail(big); len(got) != acpStderrTailCap {
+		t.Errorf("stderrTail(big) len = %d, want %d", len(got), acpStderrTailCap)
+	}
+	small := &bigStderrPrompter{out: "boom"}
+	if got := stderrTail(small); got != "boom" {
+		t.Errorf("stderrTail(small) = %q, want boom", got)
+	}
+}
+
+type bigStderrPrompter struct{ out string }
+
+func (b *bigStderrPrompter) Prompt(ctx context.Context, text string) (acp.PromptResponse, error) {
+	return acp.PromptResponse{}, nil
+}
+func (b *bigStderrPrompter) Close() error                        { return nil }
+func (b *bigStderrPrompter) SetOnUpdate(func(acp.SessionUpdate)) {}
+func (b *bigStderrPrompter) Stderr() string                      { return b.out }
+
 type boomPrompter struct{}
 
 func (b *boomPrompter) Prompt(ctx context.Context, text string) (acp.PromptResponse, error) {
 	return acp.PromptResponse{}, errors.New("agent exploded")
 }
-func (b *boomPrompter) Close() error { return nil }
+func (b *boomPrompter) Close() error                        { return nil }
 func (b *boomPrompter) SetOnUpdate(func(acp.SessionUpdate)) {}
 
 // TestACPStartUserEntryPersisted verifies json round-trip of agentstore.Entry

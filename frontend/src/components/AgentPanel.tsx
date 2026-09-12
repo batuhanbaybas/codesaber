@@ -74,7 +74,7 @@ const AgentPanel: React.FC = () => {
   const st = activeId ? state[activeId] : undefined
   const running = !!st?.harness && st.status !== 'harness-down' && st.status !== 'no-harness'
   const thinking = st?.status === 'thinking'
-  const pending = st?.pendingPermission ?? null
+  const pending = st?.pendingPermissions ?? []
 
   // Keep the chat pinned to the newest content.
   useEffect(() => {
@@ -160,24 +160,29 @@ const AgentPanel: React.FC = () => {
         ))}
       </div>
 
-      {/* Permission card */}
-      {pending && (
-        <div className="shrink-0 mx-2 mb-1 rounded border border-[#e6c07b]/40 bg-[#1e1f22] p-2">
+      {/* Permission cards (stacked: multiple requests can be pending at once) */}
+      {pending.map((p) => (
+        <div
+          key={p.requestId}
+          className="shrink-0 mx-2 mb-1 rounded border border-[#e6c07b]/40 bg-[#1e1f22] p-2"
+        >
           <div className="text-[11px] text-[#e6c07b] mb-1">
-            Permission requested
+            {p.purpose === 'fs-write'
+              ? `Write permission requested${p.path ? ` — ${p.path}` : ''}`
+              : 'Permission requested'}
           </div>
-          {pending.options.length === 0 ? (
+          {p.options.length === 0 ? (
             <div className="text-dim">(no options offered)</div>
           ) : (
             <div className="flex flex-col gap-1">
-              {pending.options.map((o) => (
+              {p.options.map((o) => (
                 <button
                   key={o.optionId ?? o.name}
                   className="text-left px-2 py-1 rounded bg-[#2a2c31] hover:bg-[#373940]"
                   onClick={() =>
                     void respondPermission(
                       activeId,
-                      pending.requestId,
+                      p.requestId,
                       o.optionId ?? '',
                       false,
                     )
@@ -192,7 +197,7 @@ const AgentPanel: React.FC = () => {
               <button
                 className="text-left px-2 py-1 rounded text-[#e5735f] hover:bg-[#2a2c31]"
                 onClick={() =>
-                  void respondPermission(activeId, pending.requestId, '', true)
+                  void respondPermission(activeId, p.requestId, '', true)
                 }
               >
                 Reject
@@ -200,7 +205,7 @@ const AgentPanel: React.FC = () => {
             </div>
           )}
         </div>
-      )}
+      ))}
 
       {/* Composer */}
       <div className="shrink-0 border-t border-panel p-2 flex flex-col gap-1.5">

@@ -116,6 +116,79 @@ func TestConnNotificationDelivery(t *testing.T) {
 	}
 }
 
+// TestConnNotificationDropOnFull verifies the drop-on-full policy: flooding
+// more notifications than the buffer holds never blocks readLoop, and the
+// overflow is counted.
+func TestConnNotificationDropOnFull(t *testing.T) {
+	h := newHarness(t, ClientHandlers{})
+
+	total := notifyBuffer + 25
+	line := NewNotify(MethodSessionUpdate, map[string]any{"sessionUpdate": UpdateAgentMessageChunk}).MarshalLine()
+	for i := 0; i < total; i++ {
+		if _, err := h.agentIn.Write(line); err != nil {
+			t.Fatalf("write notify %d: %v", i, err)
+		}
+	}
+
+	// readLoop dispatches every line without blocking (drop-on-full); wait for
+	// it to finish, then verify the split: buffer full, overflow counted.
+	time.Sleep(500 * time.Millisecond)
+	buffered := len(h.conn.Notify)
+	dropped := h.conn.DroppedNotifies()
+	if buffered+int(dropped) != total {
+		t.Fatalf("buffered=%d dropped=%d, want sum %d", buffered, dropped, total)
+	}
+	if dropped < 1 {
+		t.Fatalf("expected overflow to be dropped, buffered=%d dropped=%d", buffered, dropped)
+	}
+	// Every buffered frame is a well-formed notification.
+	for i := 0; i < buffered; i++ {
+		f := <-h.conn.Notify
+		if f.Method != MethodSessionUpdate {
+			t.Fatalf("method = %q, want %q", f.Method, MethodSessionUpdate)
+		}
+	}
+}
+
+// TestConnAgentToClientRequestsDoNotBlockReadLoop floods slow agent->client
+// requests while responses to client requests keep flowing: readLoop must stay
+// live (handler goroutines answer off-loop).
+func TestConnAgentToClientRequestsDoNotBlockReadLoop(t *testing.T) {
+	release := make(chan struct{})
+	handlers := ClientHandlers{
+		ReadTextFile: func(sessionID, path string) (string, error) {
+			<-release // block the handler until we say so
+			return "x", nil
+		},
+	}
+	h := newHarness(t, handlers)
+
+	// 3 blocked agent->client requests; pre-goroutine these would stall the
+	// read loop before our own request could be answered.
+	for i := uint64(1); i <= 3; i++ {
+		line := NewRequest(i, MethodFsReadTextFile, map[string]any{"sessionId": "s", "path": "/x"}).MarshalLine()
+		if _, err := h.agentIn.Write(line); err != nil {
+			t.Fatalf("write agent request: %v", err)
+		}
+	}
+	time.Sleep(100 * time.Millisecond) // let them get stuck in handlers
+
+	h.serveAgent(t, func(id any, method string) string {
+		return fmt.Sprintf(`{"jsonrpc":"2.0","id":%v,"result":{"id":%v}}`, id, id)
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := h.conn.Request(ctx, "ping", nil)
+	if err != nil {
+		t.Fatalf("Request while agent->client handlers blocked: %v", err)
+	}
+	if m := res.(map[string]any); m["id"] == nil {
+		t.Fatalf("res = %#v, want id", res)
+	}
+	close(release)
+}
+
 func TestConnAgentToClientRequestHandled(t *testing.T) {
 	handlers := ClientHandlers{
 		ReadTextFile: func(sessionID, path string) (string, error) {
