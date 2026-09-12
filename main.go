@@ -52,23 +52,20 @@ func main() {
 		},
 	})
 
-	// Create a new window with the necessary options.
-	// 'Title' is the title of the window.
-	// 'Mac' options tailor the window when running on macOS.
-	// 'BackgroundColour' is the background colour of the window.
-	// 'URL' is the URL that will be loaded into the webview.
+	// Startup shows the welcome window only; the workspace window is created
+	// on demand from the backend RPC EnsureWorkspaceWindow (adapter/window.go).
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title: "Window 1",
-		// Window sized to the golden ratio (1000 / 618 ≈ 1.618).
-		Width:  1000,
-		Height: 618,
+		Name:    adapter.WelcomeWindowName,
+		Title:   "aide",
+		Width:   800,
+		Height:  520,
 		Mac: application.MacWindow{
-			InvisibleTitleBarHeight: 50,
+			InvisibleTitleBarHeight: 34,
 			Backdrop:                application.MacBackdropTranslucent,
 			TitleBar:                application.MacTitleBarHiddenInset,
 		},
-		BackgroundColour: application.NewRGB(6, 7, 15),
-		URL:              "/",
+		BackgroundColour: application.NewRGB(30, 31, 34),
+		URL:              "/#welcome",
 	})
 
 	// Create a goroutine that emits an event containing the current time every second.

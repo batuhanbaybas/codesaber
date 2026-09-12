@@ -28,6 +28,21 @@ export function CloseWatcher(projectID: string): $CancellablePromise<void> {
 }
 
 /**
+ * CloseWelcome hides the welcome window after a project has been opened.
+ */
+export function CloseWelcome(): $CancellablePromise<void> {
+    return $Call.ByID(3084079084);
+}
+
+/**
+ * EnsureWorkspaceWindow opens the workspace window if none exists (or shows
+ * the existing one). Called by the frontend after opening a project.
+ */
+export function EnsureWorkspaceWindow(): $CancellablePromise<void> {
+    return $Call.ByID(2539716435);
+}
+
+/**
  * ForgetRecent drops a recents entry by root path.
  */
 export function ForgetRecent(root: string): $CancellablePromise<void> {

@@ -129,6 +129,9 @@ func (a *App) RemoveProject(id string) error {
 	}
 	a.CloseWatcher(id)
 	a.sink.Emit(project.EventRemoved, map[string]any{"id": id, "root": p.Root})
+	if len(a.reg.List()) == 0 {
+		adapter.ShowWelcomeWindow()
+	}
 	return nil
 }
 
@@ -230,4 +233,15 @@ func (a *App) ReadFile(path string) (string, error) {
 // SaveFile persists content via editor.Service (atomic write + dirty tracking).
 func (a *App) SaveFile(path, content string) error {
 	return a.buf.Save(path, content)
+}
+
+// EnsureWorkspaceWindow opens the workspace window if none exists (or shows
+// the existing one). Called by the frontend after opening a project.
+func (a *App) EnsureWorkspaceWindow() {
+	adapter.EnsureWorkspaceWindow()
+}
+
+// CloseWelcome hides the welcome window after a project has been opened.
+func (a *App) CloseWelcome() {
+	adapter.CloseWelcomeWindow()
 }
