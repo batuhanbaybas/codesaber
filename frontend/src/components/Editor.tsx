@@ -10,6 +10,7 @@ import { json } from '@codemirror/lang-json'
 import { go } from '@codemirror/legacy-modes/mode/go'
 import { useProjects } from '../state/projects'
 import { useTabs, type Tab } from '../state/tabs'
+import * as App from '../../bindings/aide/backend/app'
 
 const languageFor = (path: string): Extension => {
   const name = path.slice(path.lastIndexOf('/') + 1).toLowerCase()
@@ -76,26 +77,18 @@ const theme = EditorView.theme(
   { dark: true },
 )
 
-interface TabEditorProps {
+const TabEditor: React.FC<{
   projectId: string
   tab: Tab
   active: boolean
-  onSave?: (path: string, content: string) => void
-}
-
-const TabEditor: React.FC<TabEditorProps> = ({
-  projectId,
-  tab,
-  active,
-  onSave,
-}) => {
-  const { setDirty } = useTabs()
+}> = ({ projectId, tab, active }) => {
+  const { setDirty, save, reload, keepMine } = useTabs()
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)
   const loadedContentRef = useRef<string | undefined>(undefined)
   const dirtyRef = useRef(false)
-  const onSaveRef = useRef(onSave)
-  onSaveRef.current = onSave
+  const onSaveRef = useRef(save)
+  onSaveRef.current = save
 
   useEffect(() => {
     if (!hostRef.current) return
@@ -111,7 +104,7 @@ const TabEditor: React.FC<TabEditorProps> = ({
               key: 'Mod-s',
               preventDefault: true,
               run: (v) => {
-                onSaveRef.current?.(tab.path, v.state.doc.toString())
+                onSaveRef.current?.(projectId, tab.path, v.state.doc.toString())
                 return true
               },
             },
@@ -168,18 +161,41 @@ const TabEditor: React.FC<TabEditorProps> = ({
 
   return (
     <div
-      ref={hostRef}
-      className="absolute inset-0 overflow-hidden"
-      style={{ display: active ? 'block' : 'none' }}
-    />
+      className="absolute inset-0 flex flex-col"
+      style={{ display: active ? 'flex' : 'none' }}
+    >
+      {tab.staleExternally && (
+        <div className="flex items-center gap-3 px-3 py-1 text-xs bg-[#3b2f1e] border-b border-[#b58900]/40 text-[#e6c07b] shrink-0">
+          <span>File changed on disk</span>
+          <button
+            className="no-drag px-2 py-0.5 rounded border border-[#e6c07b]/50 hover:bg-[#e6c07b]/15"
+            onClick={() =>
+              App.ReadFile(tab.path)
+                .then((c) => reload(projectId, tab.path, c))
+                .catch(() => {})
+            }
+          >
+            Reload
+          </button>
+          <button
+            className="no-drag px-2 py-0.5 rounded border border-[#e6c07b]/50 hover:bg-[#e6c07b]/15"
+            onClick={() => keepMine(projectId, tab.path)}
+          >
+            Keep mine
+          </button>
+        </div>
+      )}
+      <div
+        ref={hostRef}
+        className="relative flex-1 min-h-0 overflow-hidden"
+      />
+    </div>
   )
 }
 
-const Editor: React.FC<{ onSave?: (path: string, content: string) => void }> = ({
-  onSave,
-}) => {
+const Editor: React.FC = () => {
   const { activeId } = useProjects()
-  const { tabsByProject } = useTabs()
+  const { tabsByProject, saveError } = useTabs()
   const state = activeId ? tabsByProject[activeId] : undefined
 
   if (!activeId || !state || !state.active) {
@@ -193,16 +209,22 @@ const Editor: React.FC<{ onSave?: (path: string, content: string) => void }> = (
   }
 
   return (
-    <div className="relative flex-1 min-h-0 bg-editor">
-      {state.open.map((t) => (
-        <TabEditor
-          key={t.path}
-          projectId={activeId}
-          tab={t}
-          active={t.path === state.active}
-          onSave={onSave}
-        />
-      ))}
+    <div className="relative flex-1 min-h-0 bg-editor flex flex-col">
+      {saveError && (
+        <div className="px-3 py-1 text-xs bg-[#5a1d1d] border-b border-[#ff6b6b]/40 text-[#ff9999] shrink-0">
+          {saveError}
+        </div>
+      )}
+      <div className="relative flex-1 min-h-0">
+        {state.open.map((t) => (
+          <TabEditor
+            key={t.path}
+            projectId={activeId}
+            tab={t}
+            active={t.path === state.active}
+          />
+        ))}
+      </div>
     </div>
   )
 }
