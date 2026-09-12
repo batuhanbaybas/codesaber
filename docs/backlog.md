@@ -37,11 +37,11 @@ Legend: ✅ done · 🚧 in progress · ⬜ todo · 📌 deferred (was requested
 - ✅ Tool-call display; diff proposals with accept/reject (reuses Phase 2 diffs)
 - ✅ Harness crash → respawn, chat preserved; engine status pills wired
 
-## Phase 4 — gopls LSP ⬜
+## Phase 4 — gopls LSP ✅ (2026-09-12)
 
-- ⬜ LSP client framework, one gopls server per project
-- ⬜ Go-to-definition, hover, diagnostics gutter, document symbols
-- ⬜ Config entries for future TS/Rust/Java servers
+- ✅ LSP client framework, one gopls server per project
+- ✅ Go-to-definition, hover, diagnostics gutter, document symbols
+- 📌 Config entries for future TS/Rust/Java servers (framework ready, Phase 6)
 
 ## Phase 5 — Real Terminal ⬜
 
