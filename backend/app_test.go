@@ -121,6 +121,45 @@ func indexPrefix(list, want string) int {
 	return -1
 }
 
+func TestIndexFiles_SkipsAndCaps(t *testing.T) {
+	root := t.TempDir()
+	mkfile := func(rel string) {
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mkfile("main.go")
+	mkfile("src/deep/deeper/best.go") // full recursion, no depth limit
+	mkfile("node_modules/pkg/index.js")
+	mkfile("dist/bundle.js")
+	mkfile(".git/HEAD")
+	mkfile(".hidden")
+
+	app, _ := newTestApp(t)
+	files, err := app.IndexFiles(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := ""
+	for _, f := range files {
+		got += filepath.ToSlash(f) + "\n"
+	}
+	if !containsPrefix(got, "/main.go\n") || !containsPrefix(got, "src/deep/deeper/best.go") {
+		t.Fatalf("IndexFiles missing expected files:\n%s", got)
+	}
+	if containsPrefix(got, "node_modules") || containsPrefix(got, "dist/") {
+		t.Fatalf("IndexFiles should skip node_modules/dist:\n%s", got)
+	}
+	if containsPrefix(got, ".git") || containsPrefix(got, ".hidden") {
+		t.Fatalf("IndexFiles should skip dotfiles:\n%s", got)
+	}
+}
+
 func TestFileSystemChangeEvents(t *testing.T) {
 	app, sink := newTestApp(t)
 	p, err := app.OpenProject(t.TempDir())

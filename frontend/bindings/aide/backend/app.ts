@@ -50,6 +50,16 @@ export function ForgetRecent(root: string): $CancellablePromise<void> {
 }
 
 /**
+ * IndexFiles returns all file paths under root (absolute), walking the full
+ * tree recursively. Skips .git, node_modules, dist, build, vendor, target and
+ * .next directories, plus all other dotfiles; capped at maxIndexFiles.
+ * Phase 6 (tree-sitter index) replaces this walk.
+ */
+export function IndexFiles(root: string): $CancellablePromise<string[] | null> {
+    return $Call.ByID(2535220543, root);
+}
+
+/**
  * ListProjects returns currently open projects, most recently used first.
  */
 export function ListProjects(): $CancellablePromise<project$0.Project[] | null> {

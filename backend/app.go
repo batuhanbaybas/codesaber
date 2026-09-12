@@ -20,6 +20,16 @@ import (
 // maxTreeDepth limits ListTree recursion (root children = depth 1).
 const maxTreeDepth = 2
 
+// maxIndexFiles caps IndexFiles output so huge trees can't blow up memory.
+const maxIndexFiles = 20000
+
+// skipDirs are directory names never descended into during IndexFiles walks.
+// Phase 6 (tree-sitter index) replaces this walk.
+var skipDirs = map[string]bool{
+	".git": true, "node_modules": true, "dist": true, "build": true,
+	"vendor": true, "target": true, ".next": true,
+}
+
 // maxFileSize guards ReadFile against dumping huge binaries into memory.
 const maxFileSize = 10 << 20 // 10MB
 
@@ -219,6 +229,44 @@ func visible(name string) bool {
 		return true
 	}
 	return allowedDots[name]
+}
+
+// IndexFiles returns all file paths under root (absolute), walking the full
+// tree recursively. Skips .git, node_modules, dist, build, vendor, target and
+// .next directories, plus all other dotfiles; capped at maxIndexFiles.
+// Phase 6 (tree-sitter index) replaces this walk.
+func (a *App) IndexFiles(root string) ([]string, error) {
+	var out []string
+	err := indexWalk(root, &out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func indexWalk(dir string, out *[]string) error {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", dir, err)
+	}
+	for _, e := range ents {
+		name := e.Name()
+		if strings.HasPrefix(name, ".") || (e.IsDir() && skipDirs[name]) {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		if e.IsDir() {
+			if err := indexWalk(path, out); err != nil {
+				return err
+			}
+		} else {
+			*out = append(*out, path)
+			if len(*out) >= maxIndexFiles {
+				return nil
+			}
+		}
+	}
+	return nil
 }
 
 // ReadFile returns file content, refusing files larger than maxFileSize.

@@ -138,6 +138,7 @@ const CommandPalette: React.FC = () => {
 
   return (
     <div
+      data-command-palette="open"
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/40"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) close()

@@ -4,6 +4,7 @@ import Sidebar from '../components/Sidebar'
 import EditorTabs from '../components/EditorTabs'
 import Editor from '../components/Editor'
 import CommandPalette from '../components/CommandPalette'
+import QuickOpen from '../components/QuickOpen'
 import StatusBar from '../components/StatusBar'
 import { ProjectsProvider } from '../state/projects'
 import { TabsProvider } from '../state/tabs'
@@ -103,6 +104,7 @@ const WorkspaceInner: React.FC = () => {
       </div>
       <StatusBar />
       <CommandPalette />
+      <QuickOpen />
       {/* Bottom strip: terminal placeholder */}
       {ui.terminal && (
         <div className="h-40 shrink-0 bg-panel border-t border-panel px-3 py-2 text-xs text-dim">
