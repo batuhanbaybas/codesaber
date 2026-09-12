@@ -10,6 +10,7 @@ import { json } from '@codemirror/lang-json'
 import { go } from '@codemirror/legacy-modes/mode/go'
 import { useProjects } from '../state/projects'
 import { useTabs, type Tab } from '../state/tabs'
+import DiffViewer from './DiffViewer'
 import * as App from '../../bindings/aide/backend/app'
 
 const languageFor = (path: string): Extension => {
@@ -216,14 +217,23 @@ const Editor: React.FC = () => {
         </div>
       )}
       <div className="relative flex-1 min-h-0">
-        {state.open.map((t) => (
-          <TabEditor
-            key={t.path}
-            projectId={activeId}
-            tab={t}
-            active={t.path === state.active}
-          />
-        ))}
+        {state.open.map((t) =>
+          t.kind === 'diff' ? (
+            <DiffViewer
+              key={t.path}
+              projectId={activeId}
+              tab={t}
+              active={t.path === state.active}
+            />
+          ) : (
+            <TabEditor
+              key={t.path}
+              projectId={activeId}
+              tab={t}
+              active={t.path === state.active}
+            />
+          ),
+        )}
       </div>
     </div>
   )

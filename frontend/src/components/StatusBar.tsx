@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react'
 import { Events } from '@wailsio/runtime'
 import * as App from '../../bindings/aide/backend/app'
 import { useLayout } from '../state/layout'
+import { useProjects } from '../state/projects'
+import { useGit } from '../state/git'
 
 // EngineStatus mirrors the payload of the backend "engine.status" event.
 interface EngineStatus {
@@ -84,10 +86,14 @@ const EnginePills: React.FC = () => {
 
 const StatusBar: React.FC = () => {
   const { ui, toggle } = useLayout()
+  const { activeId } = useProjects()
+  const { status } = useGit()
+  const branch =
+    (activeId ? status[activeId]?.branch : undefined) || '(unknown)'
   return (
     <div className="h-6 shrink-0 flex items-center justify-between px-3 bg-panel border-t border-panel text-[11px] text-dim">
       <div className="flex items-center gap-2">
-        <span className="px-2 rounded bg-[#1e1f22] text-primary">{'\u2387'} main</span>
+        <span className="px-2 rounded bg-[#1e1f22] text-primary">{'\u2387'} {branch}</span>
         <EnginePills />
       </div>
       <div className="flex items-center gap-2">

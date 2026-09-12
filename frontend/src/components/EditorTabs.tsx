@@ -23,6 +23,14 @@ const EditorTabs: React.FC = () => {
           onClick={() => activeId && setActive(activeId, tab.path)}
         >
           <span>{tab.title}</span>
+          {tab.kind === 'diff' && (
+            <span
+              className={tab.diffStaged ? 'text-[#7dcf9e]' : 'text-[#e6c07b]'}
+              title="diff tab"
+            >
+              {'\u0394'}
+            </span>
+          )}
           {tab.dirty && (
             <span className="text-primary group-hover:hidden">{'\u25cf'}</span>
           )}

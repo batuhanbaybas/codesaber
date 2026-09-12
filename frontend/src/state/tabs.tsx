@@ -15,6 +15,8 @@ export interface Tab {
   dirContent?: string
   dirty: boolean
   staleExternally?: boolean
+  kind?: 'file' | 'diff'
+  diffStaged?: boolean
 }
 
 export interface ProjectTabs {
@@ -32,11 +34,29 @@ interface TabsContextValue {
   save: (projectId: string, path: string, content: string) => Promise<void>
   reload: (projectId: string, path: string, content: string) => void
   keepMine: (projectId: string, path: string) => void
+  openDiffTab: (projectId: string, path: string, staged: boolean) => void
 }
 
 const TabsContext = createContext<TabsContextValue | null>(null)
 
 const titleOf = (path: string) => path.slice(path.lastIndexOf('/') + 1) || path
+
+// diffTabPath encodes a diff tab's identity in its key so diff and file tabs
+// can coexist in the strip without colliding on path.
+export const diffTabPath = (path: string, staged: boolean) =>
+  `\u0394:${staged ? 's' : 'u'}:${path}`
+
+// parseDiffTabPath reverses diffTabPath (title prefix \u0394, then staged
+// flag, then the real workspace-relative path).
+export const parseDiffTabPath = (
+  key: string,
+): { path: string; staged: boolean } | null => {
+  if (!key.startsWith('\u0394:')) return null
+  const rest = key.slice(2)
+  const colon = rest.indexOf(':')
+  if (colon === -1) return null
+  return { path: rest.slice(colon + 1), staged: rest.slice(0, colon) === 's' }
+}
 
 // Window during which an fs.change echo for a path we just saved is ignored.
 const saveEchoWindowMs = 2000
@@ -200,6 +220,33 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
     [mutateTab],
   )
 
+  // Diff tabs are never dirty: open is idempotent (activates an existing
+  // diff tab); no file content is fetched here — the diff viewer pulls the
+  // patch from the git provider by key.
+  const openDiffTab = useCallback(
+    (projectId: string, path: string, staged: boolean) => {
+      const key = diffTabPath(path, staged)
+      setTabsByProject((prev) => {
+        const st = prev[projectId] ?? { open: [], active: null }
+        if (st.open.some((t) => t.path === key)) {
+          return { ...prev, [projectId]: { ...st, active: key } }
+        }
+        const tab: Tab = {
+          path: key,
+          title: `\u0394 ${titleOf(path)}`,
+          dirty: false,
+          kind: 'diff',
+          diffStaged: staged,
+        }
+        return {
+          ...prev,
+          [projectId]: { open: [...st.open, tab], active: key },
+        }
+      })
+    },
+    [],
+  )
+
   // fs.change reconcile: auto-reload non-dirty tabs, flag dirty tabs; the
   // editor surface renders the banner. remove/rename silently closes
   // non-dirty tabs. Immediately-after-save echoes are ignored so our own
@@ -245,6 +292,7 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
         save,
         reload,
         keepMine,
+        openDiffTab,
       }}
     >
       {children}

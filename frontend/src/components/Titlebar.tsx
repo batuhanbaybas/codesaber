@@ -1,12 +1,15 @@
 import React from 'react'
 import { useProjects } from '../state/projects'
 import { useTabs } from '../state/tabs'
+import { useGit } from '../state/git'
 
 const Titlebar: React.FC = () => {
   const { projects, activeId } = useProjects()
   const { tabsByProject } = useTabs()
+  const { status } = useGit()
 
   const active = projects.find((p) => p.id === activeId) ?? null
+  const branch = (activeId ? status[activeId]?.branch : undefined) ?? active?.branch
   const tabsState = activeId ? tabsByProject[activeId] : undefined
   const activeTab = tabsState?.active
     ? tabsState.open.find((t) => t.path === tabsState.active)
@@ -22,12 +25,12 @@ const Titlebar: React.FC = () => {
           <span className="text-primary" title={active.root}>
             {active.name}
           </span>
-          {active.branch && (
+          {branch && (
             <span
               className="no-drag ml-2 px-2 rounded bg-[#1e1f22] text-[11px] text-dim"
               title="branch"
             >
-              {'\u2387'} {active.branch}
+              {'\u2387'} {branch}
             </span>
           )}
           {activeTab && (
