@@ -13,6 +13,9 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as git$0 from "./git/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as project$0 from "./project/models.js";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -47,6 +50,69 @@ export function EnsureWorkspaceWindow(): $CancellablePromise<void> {
  */
 export function ForgetRecent(root: string): $CancellablePromise<void> {
     return $Call.ByID(1919972942, root);
+}
+
+/**
+ * GitBranches lists local branches (refs/heads, sorted, short names).
+ */
+export function GitBranches(projectID: string): $CancellablePromise<string[] | null> {
+    return $Call.ByID(133901168, projectID);
+}
+
+/**
+ * GitCheckout switches worktree to the given local branch.
+ */
+export function GitCheckout(projectID: string, name: string): $CancellablePromise<void> {
+    return $Call.ByID(1882087752, projectID, name);
+}
+
+/**
+ * GitCommit commits staged changes with the fixed "aide <aide@local>" identity.
+ */
+export function GitCommit(projectID: string, message: string): $CancellablePromise<void> {
+    return $Call.ByID(1431541081, projectID, message);
+}
+
+/**
+ * GitCreateBranch creates a branch pointing at the current HEAD.
+ */
+export function GitCreateBranch(projectID: string, name: string): $CancellablePromise<void> {
+    return $Call.ByID(906079848, projectID, name);
+}
+
+/**
+ * GitDiff returns the diff for path against HEAD (staged) or the index (unstaged).
+ */
+export function GitDiff(projectID: string, path: string, staged: boolean): $CancellablePromise<git$0.DiffPatch> {
+    return $Call.ByID(1243866939, projectID, path, staged);
+}
+
+/**
+ * GitLog returns the n most recent commit entries walking first-parent from HEAD.
+ */
+export function GitLog(projectID: string, n: number): $CancellablePromise<git$0.LogEntry[] | null> {
+    return $Call.ByID(1411275054, projectID, n);
+}
+
+/**
+ * GitStage adds files to the index ("add"; deleted files are recorded via "rm").
+ */
+export function GitStage(projectID: string, paths: string[] | null): $CancellablePromise<void> {
+    return $Call.ByID(670803978, projectID, paths);
+}
+
+/**
+ * GitStatus returns Staged/Unstaged/Untracked changes plus the current branch.
+ */
+export function GitStatus(projectID: string): $CancellablePromise<git$0.Status> {
+    return $Call.ByID(2530301110, projectID);
+}
+
+/**
+ * GitUnstage resets paths back out of the index.
+ */
+export function GitUnstage(projectID: string, paths: string[] | null): $CancellablePromise<void> {
+    return $Call.ByID(1116628283, projectID, paths);
 }
 
 /**

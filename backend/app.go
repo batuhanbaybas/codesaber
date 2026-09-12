@@ -10,10 +10,12 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"aide/backend/adapter"
 	"aide/backend/editor"
 	"aide/backend/fswatch"
+	"aide/backend/git"
 	"aide/backend/project"
 )
 
@@ -44,16 +46,28 @@ type Entry struct {
 // (currently: fswatch watcher startup success/failure).
 const EventEngineStatus = "engine.status"
 
+// EventGitStatus carries per-project git state snapshots: {projectId, status}.
+const EventGitStatus = "git.status"
+
+// EventGitError reports git failures the UI should surface inline: {projectId, message}.
+const EventGitError = "git.error"
+
+// gitStatusThrottle collapses fs-event storms: per project, git.status events
+// are emitted at most once per window; a dropped emit is recovered by the next
+// fs event that triggers emitGitStatus again.
+const gitStatusThrottle = 400 * time.Millisecond
+
 // App is the main service bound to the UI. Pure facade over engines;
 // all engine state is per-project, namespaced by Project.ID.
 type App struct {
-	sink     adapter.EventSink
-	reg      *project.Registry
-	store    *project.Store
-	buf      *editor.Service
-	mu       sync.Mutex
-	watchers map[string]*fswatch.Watcher
-	closed   map[string]bool
+	sink        adapter.EventSink
+	reg         *project.Registry
+	store       *project.Store
+	buf         *editor.Service
+	mu          sync.Mutex
+	watchers    map[string]*fswatch.Watcher
+	closed      map[string]bool
+	lastGitEmit map[string]time.Time
 }
 
 // New wires the engines together. sink receives all backend→UI events.
@@ -113,6 +127,7 @@ func (a *App) forwardWatcher(projectID string, w *fswatch.Watcher) {
 			"path":      ev.Path,
 			"op":        ev.Op,
 		})
+		a.emitGitStatus(projectID)
 	}
 }
 
@@ -302,4 +317,138 @@ func (a *App) EnsureWorkspaceWindow() {
 // CloseWelcome hides the welcome window after a project has been opened.
 func (a *App) CloseWelcome() {
 	adapter.CloseWelcomeWindow()
+}
+
+// resolveRoot returns the absolute project root for the given project ID.
+func (a *App) resolveRoot(projectID string) (string, error) {
+	p, err := a.reg.Get(projectID)
+	if err != nil {
+		return "", err
+	}
+	return p.Root, nil
+}
+
+// gitRootGitEngine fails fast when the project is unknown, then opens the
+// (stateless, cheap) git Engine per call.
+func (a *App) gitEngine(projectID string) (*git.Engine, error) {
+	root, err := a.resolveRoot(projectID)
+	if err != nil {
+		return nil, err
+	}
+	return git.New(root)
+}
+
+// GitStatus returns Staged/Unstaged/Untracked changes plus the current branch.
+func (a *App) GitStatus(projectID string) (git.Status, error) {
+	e, err := a.gitEngine(projectID)
+	if err != nil {
+		return git.Status{}, err
+	}
+	return e.Status()
+}
+
+// GitStage adds files to the index ("add"; deleted files are recorded via "rm").
+func (a *App) GitStage(projectID string, paths []string) error {
+	e, err := a.gitEngine(projectID)
+	if err != nil {
+		return err
+	}
+	return e.Stage(paths)
+}
+
+// GitUnstage resets paths back out of the index.
+func (a *App) GitUnstage(projectID string, paths []string) error {
+	e, err := a.gitEngine(projectID)
+	if err != nil {
+		return err
+	}
+	return e.Unstage(paths)
+}
+
+// GitCommit commits staged changes with the fixed "aide <aide@local>" identity.
+func (a *App) GitCommit(projectID, message string) error {
+	e, err := a.gitEngine(projectID)
+	if err != nil {
+		return err
+	}
+	return e.Commit(message, "aide <aide@local>")
+}
+
+// GitBranches lists local branches (refs/heads, sorted, short names).
+func (a *App) GitBranches(projectID string) ([]string, error) {
+	e, err := a.gitEngine(projectID)
+	if err != nil {
+		return nil, err
+	}
+	return e.Branches()
+}
+
+// GitCreateBranch creates a branch pointing at the current HEAD.
+func (a *App) GitCreateBranch(projectID, name string) error {
+	e, err := a.gitEngine(projectID)
+	if err != nil {
+		return err
+	}
+	return e.CreateBranch(name)
+}
+
+// GitCheckout switches worktree to the given local branch.
+func (a *App) GitCheckout(projectID, name string) error {
+	e, err := a.gitEngine(projectID)
+	if err != nil {
+		return err
+	}
+	return e.CheckoutBranch(name)
+}
+
+// GitDiff returns the diff for path against HEAD (staged) or the index (unstaged).
+func (a *App) GitDiff(projectID, path string, staged bool) (git.DiffPatch, error) {
+	e, err := a.gitEngine(projectID)
+	if err != nil {
+		return git.DiffPatch{}, err
+	}
+	if staged {
+		return e.DiffStaged(path)
+	}
+	return e.DiffUnstaged(path)
+}
+
+// GitLog returns the n most recent commit entries walking first-parent from HEAD.
+func (a *App) GitLog(projectID string, n int) ([]git.LogEntry, error) {
+	e, err := a.gitEngine(projectID)
+	if err != nil {
+		return nil, err
+	}
+	return e.Log(n)
+}
+
+// emitGitStatus computes Status for the project and emits git.status (throttled
+// per project) or git.error on any failure. It is a no-op for unknown projects.
+func (a *App) emitGitStatus(projectID string) {
+	root, err := a.resolveRoot(projectID)
+	if err != nil {
+		return
+	}
+	a.mu.Lock()
+	if a.lastGitEmit == nil {
+		a.lastGitEmit = map[string]time.Time{}
+	}
+	if time.Since(a.lastGitEmit[projectID]) < gitStatusThrottle {
+		a.mu.Unlock()
+		return
+	}
+	a.lastGitEmit[projectID] = time.Now()
+	a.mu.Unlock()
+
+	e, gerr := git.New(root)
+	if gerr != nil {
+		a.sink.Emit(EventGitError, map[string]string{"projectId": projectID, "message": gerr.Error()})
+		return
+	}
+	st, serr := e.Status()
+	if serr != nil {
+		a.sink.Emit(EventGitError, map[string]string{"projectId": projectID, "message": serr.Error()})
+		return
+	}
+	a.sink.Emit(EventGitStatus, map[string]any{"projectId": projectID, "status": st})
 }

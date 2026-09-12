@@ -2,10 +2,14 @@ package backend
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"aide/backend/git"
 )
 
 type fakeSink struct {
@@ -206,6 +210,269 @@ func sinkEmit(events []fakeEvent, name string) (fakeEvent, bool) {
 		}
 	}
 	return fakeEvent{}, false
+}
+
+// initRepoGit creates a temp git repo with one committed file, ready for
+// Engine/facade tests. Minimal re-creation of the backend/git test fixture.
+func initRepoGit(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
+			"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	run("init", "-q")
+	run("checkout", "-q", "-b", "master")
+	if err := os.WriteFile(filepath.Join(dir, "init.txt"), []byte("one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", ".")
+	run("commit", "-q", "-m", "init")
+	return dir
+}
+
+func TestGitFacadeStatusAndStage(t *testing.T) {
+	root := initRepoGit(t)
+	app, _ := newTestApp(t)
+	p, err := app.OpenProject(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := app.GitStatus("missing-id"); err == nil {
+		t.Fatal("unknown project should error")
+	}
+
+	st, err := app.GitStatus(p.ID)
+	if err != nil {
+		t.Fatalf("GitStatus: %v", err)
+	}
+	if st.Branch != "master" {
+		t.Fatalf("branch = %q, want master", st.Branch)
+	}
+	if len(st.Untracked)+len(st.Unstaged)+len(st.Staged) != 0 {
+		t.Fatalf("expected clean tree, got %+v", st)
+	}
+
+	// untracked file shows up
+	newFile := filepath.Join(p.Root, "work.txt")
+	if err := os.WriteFile(newFile, []byte("v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err = app.GitStatus(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Untracked) != 1 || st.Untracked[0].Path != "work.txt" {
+		t.Fatalf("untracked: %+v", st.Untracked)
+	}
+
+	// facade GitLog on initial commit
+	log, err := app.GitLog(p.ID, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(log) != 1 || strings.TrimSpace(log[0].Message) != "init" {
+		t.Fatalf("GitLog: %+v", log)
+	}
+
+	// GitBranches
+	branches, err := app.GitBranches(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(branches) != 1 || branches[0] != "master" {
+		t.Fatalf("GitBranches: %v", branches)
+	}
+
+	// stage → staged change
+	if err := app.GitStage(p.ID, []string{"work.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	st, err = app.GitStatus(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Staged) != 1 || st.Staged[0].Path != "work.txt" {
+		t.Fatalf("staged: %+v", st.Staged)
+	}
+
+	// diff staged shows the addition
+	diff, err := app.GitDiff(p.ID, "work.txt", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diff.Hunks) != 1 || len(diff.Hunks[0].Lines) == 0 {
+		t.Fatalf("GitDiff: %+v", diff)
+	}
+
+	// commit → clean
+	if err := app.GitCommit(p.ID, "work"); err != nil {
+		t.Fatal(err)
+	}
+	st, err = app.GitStatus(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Untracked)+len(st.Unstaged)+len(st.Staged) != 0 {
+		t.Fatalf("expected clean after commit, got %+v", st)
+	}
+	log, err = app.GitLog(p.ID, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(log) != 2 || strings.TrimSpace(log[0].Message) != "work" {
+		t.Fatalf("GitLog after commit: %+v", log)
+	}
+
+	// modify → unstaged; unstage via stage+unstage roundtrip
+	if err := os.WriteFile(newFile, []byte("v2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err = app.GitStatus(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Unstaged) != 1 || st.Unstaged[0].Status != 'M' {
+		t.Fatalf("unstaged: %+v", st.Unstaged)
+	}
+	if err := app.GitStage(p.ID, []string{"work.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.GitUnstage(p.ID, []string{"work.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	st, err = app.GitStatus(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Staged) != 0 {
+		t.Fatalf("staged should be empty after unstage: %+v", st.Staged)
+	}
+
+	// unstaged diff
+	diff, err = app.GitDiff(p.ID, "work.txt", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diff.Hunks) == 0 {
+		t.Fatalf("GitDiff unstaged empty: %+v", diff)
+	}
+}
+
+func TestGitFacadeBranchesCommitLog(t *testing.T) {
+	root := initRepoGit(t)
+	app, _ := newTestApp(t)
+	p, err := app.OpenProject(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.GitCreateBranch(p.ID, "feature"); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.GitCheckout(p.ID, "feature"); err != nil {
+		t.Fatal(err)
+	}
+	st, err := app.GitStatus(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Branch != "feature" {
+		t.Fatalf("branch = %q after checkout, want feature", st.Branch)
+	}
+	branches, err := app.GitBranches(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(branches) != 2 || branches[0] != "feature" || branches[1] != "master" {
+		t.Fatalf("GitBranches: %v", branches)
+	}
+	if err := app.GitCheckout(p.ID, "master"); err != nil {
+		t.Fatal(err)
+	}
+	st, _ = app.GitStatus(p.ID)
+	if st.Branch != "master" {
+		t.Fatalf("branch = %q, want master", st.Branch)
+	}
+}
+
+func TestEmitGitStatusPayloadAndThrottle(t *testing.T) {
+	root := initRepoGit(t)
+	app, sink := newTestApp(t)
+	p, err := app.OpenProject(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid := p.ID
+
+	countStatus := func() int {
+		n := 0
+		for _, ev := range sink.snapshot() {
+			if ev.name == "git.status" {
+				n++
+			}
+		}
+		return n
+	}
+
+	app.emitGitStatus(pid)
+	ev := sink.waitFor(t, "git.status", 5*time.Second)
+	payload, ok := ev.payload.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected git.status payload type %T", ev.payload)
+	}
+	if payload["projectId"] != pid {
+		t.Fatalf("bad projectId: %+v", payload)
+	}
+	st, ok := payload["status"].(git.Status)
+	if !ok {
+		t.Fatalf("bad status type %T", payload["status"])
+	}
+	if st.Branch != "master" {
+		t.Fatalf("branch = %q", st.Branch)
+	}
+
+	// immediate second call inside throttle window is dropped
+	app.emitGitStatus(pid)
+	if n := countStatus(); n != 1 {
+		t.Fatalf("throttle should drop immediate second emit, got %d events", n)
+	}
+
+	// reset throttle map → next emit passes
+	app.mu.Lock()
+	delete(app.lastGitEmit, pid)
+	app.mu.Unlock()
+	app.emitGitStatus(pid)
+	if n := countStatus(); n != 2 {
+		t.Fatalf("expected 2 git.status events after throttle reset, got %d", n)
+	}
+}
+
+func TestEmitGitStatusErrorEvent(t *testing.T) {
+	// project root without a git dir → New fails → git.error
+	app, sink := newTestApp(t)
+	p, err := app.OpenProject(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.emitGitStatus(p.ID)
+	ev := sink.waitFor(t, "git.error", 5*time.Second)
+	payload, ok := ev.payload.(map[string]string)
+	if !ok {
+		t.Fatalf("unexpected git.error payload type %T", ev.payload)
+	}
+	if payload["projectId"] != p.ID || payload["message"] == "" {
+		t.Fatalf("bad git.error payload: %+v", payload)
+	}
 }
 
 func TestRemoveProject_StopsWatcher(t *testing.T) {

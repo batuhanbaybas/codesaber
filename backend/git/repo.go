@@ -196,6 +196,26 @@ func (e *Engine) Log(n int) ([]LogEntry, error) {
 	return entries, nil
 }
 
+// Branches returns sorted short branch names (refs/heads).
+func (e *Engine) Branches() ([]string, error) {
+	iter, err := e.r.References()
+	if err != nil {
+		return nil, err
+	}
+	defer iter.Close()
+	var out []string
+	if err := iter.ForEach(func(ref *plumbing.Reference) error {
+		if ref.Name().IsBranch() {
+			out = append(out, ref.Name().Short())
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 func (e *Engine) CreateBranch(name string) error {
 	head, err := e.r.Head()
 	if err != nil {
