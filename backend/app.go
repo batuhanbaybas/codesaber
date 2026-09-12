@@ -18,6 +18,7 @@ import (
 	"aide/backend/git"
 	"aide/backend/lsp"
 	"aide/backend/project"
+	"aide/backend/terminal"
 
 	"context"
 
@@ -65,6 +66,12 @@ const EventLSPDiag = "lsp.diag"
 // non-Go-module root).
 const EventLSPState = "lsp.state"
 
+// EventTermData streams terminal output frames: {projectId, termId, data base64}.
+const EventTermData = "term.data"
+
+// EventTermExit reports terminal session termination: {projectId, termId, code}.
+const EventTermExit = "term.exit"
+
 // lspDiagThrottle collapses gopls diagnostic bursts per project, mirroring
 // the gitStatusThrottle leading/trailing pattern.
 const lspDiagThrottle = 200 * time.Millisecond
@@ -89,6 +96,12 @@ type App struct {
 	lastGitEmit map[string]time.Time
 	pendingEmit map[string]bool
 	agents      map[string]*agentSession
+
+	// termMu guards terminal bookkeeping: sessions keyed by termID and the
+	// per-project index of termIDs.
+	termMu       sync.Mutex
+	sessions     map[string]*terminal.Session
+	projectIndex map[string][]string
 
 	// lspMu guards LSP bookkeeping (per-path versions, diag throttles and
 	// the last emitted LSP state per project).
@@ -128,6 +141,8 @@ func NewWith(sink adapter.EventSink, storePath string) *App {
 		watchers:             map[string]*fswatch.Watcher{},
 		closed:               map[string]bool{},
 		agents:               map[string]*agentSession{},
+		sessions:             map[string]*terminal.Session{},
+		projectIndex:         map[string][]string{},
 		lspVersions:          map[string]map[string]int{},
 		lastDiagEmit:         map[string]time.Time{},
 		lspPendingDiag:       map[string]bool{},
@@ -232,6 +247,7 @@ func (a *App) RemoveProject(id string) error {
 	delete(a.lastLSPState, id)
 	a.lspMu.Unlock()
 	a.CloseWatcher(id)
+	a.stopProjectTerms(id)
 	_ = a.ACPStop(id)
 	a.sink.Emit(project.EventRemoved, map[string]any{"id": id, "root": p.Root})
 	if len(a.reg.List()) == 0 {
@@ -765,4 +781,141 @@ func (a *App) LSPSymbols(projectID, path string) ([]lsp.DocumentSymbol, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return c.DocumentSymbols(ctx, lsp.ToURI(path))
+}
+
+// TermStart spawns a shell session inside a PTY for the project and returns
+// its termID ("projectId|suffix"). shell is the binary to run ("" defaults
+// to /bin/sh); cwd is the project root.
+func (a *App) TermStart(projectID, shell, suffix string) (string, error) {
+	root, err := a.resolveRoot(projectID)
+	if err != nil {
+		return "", err
+	}
+	termID := projectID + "|" + suffix
+	sess, err := terminal.New(terminal.SessionOpts{
+		ID:    termID,
+		Cwd:   root,
+		Shell: shell,
+	})
+	if err != nil {
+		return "", err
+	}
+	a.termMu.Lock()
+	a.sessions[termID] = sess
+	a.projectIndex[projectID] = append(a.projectIndex[projectID], termID)
+	a.termMu.Unlock()
+
+	go a.pumpTerm(projectID, termID, sess)
+	return termID, nil
+}
+
+// pumpTerm forwards the session's event stream to the sink. Data frames go
+// through a small bounded queue with drop-on-full so a slow UI never blocks
+// the session reader; dropped frames are counted. The single Exit event is
+// always delivered (it is never dropped) and releases the session entry.
+func (a *App) pumpTerm(projectID, termID string, sess *terminal.Session) {
+	queue := make(chan terminal.Event, 256)
+	var dropped int
+
+	go func() {
+		for ev := range sess.Data() {
+			select {
+			case queue <- ev:
+			default:
+				if !ev.Exit {
+					dropped++
+				}
+			}
+		}
+	}()
+
+	for ev := range queue {
+		if ev.Exit {
+			a.releaseTerm(projectID, termID)
+			a.sink.Emit(EventTermExit, map[string]any{
+				"projectId": projectID,
+				"termId":    termID,
+				"code":      ev.Code,
+			})
+			return
+		}
+		a.sink.Emit(EventTermData, map[string]any{
+			"projectId": projectID,
+			"termId":    termID,
+			"data":      ev.Data,
+		})
+	}
+	_ = dropped
+}
+
+// stopProjectTerms stops and releases every terminal session opened for a
+// project (called when the project is removed).
+func (a *App) stopProjectTerms(projectID string) {
+	a.termMu.Lock()
+	ids := append([]string(nil), a.projectIndex[projectID]...)
+	delete(a.projectIndex, projectID)
+	a.termMu.Unlock()
+	for _, termID := range ids {
+		a.releaseTerm(projectID, termID)
+	}
+}
+
+// releaseTerm removes the session entry and closes it (idempotent).
+func (a *App) releaseTerm(projectID, termID string) {
+	a.termMu.Lock()
+	sess, ok := a.sessions[termID]
+	delete(a.sessions, termID)
+	idx := a.projectIndex[projectID]
+	for i, id := range idx {
+		if id == termID {
+			a.projectIndex[projectID] = append(idx[:i], idx[i+1:]...)
+			break
+		}
+	}
+	a.termMu.Unlock()
+	if ok {
+		_ = sess.Close()
+	}
+}
+
+// TermInput writes raw bytes to the terminal's stdin.
+func (a *App) TermInput(termID string, data []byte) error {
+	a.termMu.Lock()
+	sess, ok := a.sessions[termID]
+	a.termMu.Unlock()
+	if !ok {
+		return fmt.Errorf("terminal: unknown session %s", termID)
+	}
+	return sess.Input(data)
+}
+
+// TermResize resizes the terminal's PTY window.
+func (a *App) TermResize(termID string, rows, cols int) error {
+	a.termMu.Lock()
+	sess, ok := a.sessions[termID]
+	a.termMu.Unlock()
+	if !ok {
+		return fmt.Errorf("terminal: unknown session %s", termID)
+	}
+	return sess.Resize(rows, cols)
+}
+
+// TermStop terminates and releases the terminal session.
+func (a *App) TermStop(termID string) error {
+	a.termMu.Lock()
+	_, ok := a.sessions[termID]
+	a.termMu.Unlock()
+	if !ok {
+		return fmt.Errorf("terminal: unknown session %s", termID)
+	}
+	a.releaseTerm(sidProject(termID), termID)
+	return nil
+}
+
+// sidProject splits termID into its projectID part.
+func sidProject(termID string) string {
+	if i := strings.IndexByte(termID, '|'); i >= 0 {
+		return termID[:i]
+	}
+	return termID
 }

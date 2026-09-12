@@ -319,3 +319,33 @@ export function RemoveProject(id: string): $CancellablePromise<void> {
 export function SaveFile(path: string, content: string): $CancellablePromise<void> {
     return $Call.ByID(3028267559, path, content);
 }
+
+/**
+ * TermInput writes raw bytes to the terminal's stdin.
+ */
+export function TermInput(termID: string, data: string | null): $CancellablePromise<void> {
+    return $Call.ByID(3222497186, termID, data);
+}
+
+/**
+ * TermResize resizes the terminal's PTY window.
+ */
+export function TermResize(termID: string, rows: number, cols: number): $CancellablePromise<void> {
+    return $Call.ByID(3544325586, termID, rows, cols);
+}
+
+/**
+ * TermStart spawns a shell session inside a PTY for the project and returns
+ * its termID ("projectId|suffix"). shell is the binary to run ("" defaults
+ * to /bin/sh); cwd is the project root.
+ */
+export function TermStart(projectID: string, shell: string, suffix: string): $CancellablePromise<string> {
+    return $Call.ByID(1642386958, projectID, shell, suffix);
+}
+
+/**
+ * TermStop terminates and releases the terminal session.
+ */
+export function TermStop(termID: string): $CancellablePromise<void> {
+    return $Call.ByID(1458252758, termID);
+}

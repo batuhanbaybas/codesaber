@@ -807,3 +807,74 @@ func TestLSPFacade_NonGoModuleRoot(t *testing.T) {
 		t.Fatalf("lsp.state payload = %#v", ev.payload)
 	}
 }
+
+func TestTermLifecycle(t *testing.T) {
+	app, sink := newTestApp(t)
+	proj, err := app.OpenProject(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	termID, err := app.TermStart(proj.ID, "/bin/sh", "0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if termID != proj.ID+"|0" {
+		t.Fatalf("termID = %q, want %q", termID, proj.ID+"|0")
+	}
+
+	marker := "aide-facade-42"
+	if err := app.TermInput(termID, []byte("echo "+marker+"\r")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for the echoed task output, resized mid-flight.
+	var gotMarker bool
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		app.TermResize(termID, 40, 120)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		ev := sink.waitFor(t, EventTermData, deadline.Sub(time.Now()))
+		payload := ev.payload.(map[string]any)
+		var data []byte
+		if dd, ok := payload["data"].([]byte); ok {
+			data = dd
+		} else {
+			continue
+		}
+		if strings.Contains(string(data), marker) {
+			gotMarker = true
+			break
+		}
+	}
+	if !gotMarker {
+		t.Fatal("marker not received")
+	}
+
+	if err := app.TermStop(termID); err != nil {
+		t.Fatal(err)
+	}
+	ev := sink.waitFor(t, EventTermExit, 5*time.Second)
+	payload := ev.payload.(map[string]any)
+	if payload["termId"] != termID {
+		t.Fatalf("term.exit payload = %#v", payload)
+	}
+	// Double TermStop: entry already removed, must report unknown.
+	if err := app.TermStop(termID); err == nil {
+		t.Fatal("expected error stopping already-released term")
+	}
+}
+
+func TestTermInputUnknown(t *testing.T) {
+	app, _ := newTestApp(t)
+	if err := app.TermInput("nope|0", []byte("x")); err == nil {
+		t.Fatal("expected error for unknown termID")
+	}
+	if err := app.TermResize("nope|0", 10, 10); err == nil {
+		t.Fatal("expected error for unknown termID")
+	}
+	if err := app.TermStop("nope|0"); err == nil {
+		t.Fatal("expected error for unknown termID")
+	}
+}
