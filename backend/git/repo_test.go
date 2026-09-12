@@ -79,3 +79,41 @@ func TestStatusTracksStagedUnstagedUntracked(t *testing.T) {
 		t.Fatalf("post-unstage rest: %+v %+v", st.Unstaged, st.Untracked)
 	}
 }
+
+func TestCommit(t *testing.T) {
+	dir := initRepo(t)
+	e, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(dir, "init.txt"), []byte("three"), 0o644)
+	if err := e.Stage([]string{"init.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Commit("bump", "aide <aide@local>"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	st, _ := e.Status()
+	if len(st.Staged)+len(st.Unstaged)+len(st.Untracked) != 0 {
+		t.Fatalf("should be clean: %+v", st)
+	}
+	nodes, _ := e.Log(5)
+	if len(nodes) < 2 || nodes[0].Message != "bump" {
+		t.Fatalf("log: %+v", nodes)
+	}
+}
+
+func TestBranchesAndCheckout(t *testing.T) {
+	dir := initRepo(t)
+	e, _ := New(dir)
+	if err := e.CreateBranch("feature/x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.CheckoutBranch("feature/x"); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := e.Status()
+	if st.Branch != "feature/x" {
+		t.Fatalf("branch: %q", st.Branch)
+	}
+}

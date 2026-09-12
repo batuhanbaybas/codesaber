@@ -20,3 +20,23 @@ type Status struct {
 	Unstaged  []Change `json:"unstaged"`
 	Untracked []Change `json:"untracked"`
 }
+
+type DiffHunk struct {
+	Header    string   `json:"header"`
+	Lines     []string `json:"lines"`
+	Additions int      `json:"additions"`
+	Deletions int      `json:"deletions"`
+}
+
+type DiffPatch struct {
+	OldPath string     `json:"oldPath"`
+	NewPath string     `json:"newPath"`
+	Hunks   []DiffHunk `json:"hunks"`
+}
+
+type LogEntry struct {
+	Hash    string `json:"hash"`
+	Author  string `json:"author"`
+	Message string `json:"message"`
+	Time    string `json:"time"`
+}
