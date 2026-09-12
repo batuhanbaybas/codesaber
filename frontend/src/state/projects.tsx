@@ -32,6 +32,8 @@ export const ProjectsProvider: React.FC<{ children: React.ReactNode }> = ({
 }) => {
   const [projects, setProjects] = useState<Project[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
+  const projectsRef = useRef(projects)
+  projectsRef.current = projects
   const openInFlight = useRef(false)
 
   useEffect(() => {
@@ -58,7 +60,11 @@ export const ProjectsProvider: React.FC<{ children: React.ReactNode }> = ({
       const { id } = (ev.data ?? {}) as { id?: string }
       if (!id) return
       setProjects((prev) => prev.filter((x) => x.id !== id))
-      setActiveId((cur) => (cur === id ? null : cur))
+      setActiveId((cur) => {
+        if (cur !== id) return cur
+        const rest = projectsRef.current.filter((x) => x.id !== id)
+        return rest[0]?.id ?? null
+      })
     })
     return () => {
       onAdded()

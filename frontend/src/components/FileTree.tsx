@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import * as App from '../../bindings/aide/backend/app'
 import type { Entry } from '../../bindings/aide/backend/models'
 import { useProjects } from '../state/projects'
@@ -24,6 +24,13 @@ const FileTree: React.FC<{ root: string; projectId: string }> = ({
   const [entries, setEntries] = useState<Entry[]>([])
   const [openDirs, setOpenDirs] = useState<Set<string>>(new Set())
   const [extra, setExtra] = useState<Record<string, Entry[]>>({})
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   useEffect(() => {
     if (!root) return
@@ -105,7 +112,7 @@ const FileTree: React.FC<{ root: string; projectId: string }> = ({
     })
     if (!wasOpen && depthOf(path) >= 2 && !extra[path]) {
       App.ListTree(path).then((es) => {
-        setExtra((prev) => ({ ...prev, [path]: es ?? [] }))
+        if (mountedRef.current) setExtra((prev) => ({ ...prev, [path]: es ?? [] }))
       })
     }
   }

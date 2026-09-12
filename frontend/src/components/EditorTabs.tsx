@@ -23,30 +23,18 @@ const EditorTabs: React.FC = () => {
           onClick={() => activeId && setActive(activeId, tab.path)}
         >
           <span>{tab.title}</span>
-          {tab.dirty ? (
-            <>
-              <span className="text-primary group-hover:hidden">{'\u25cf'}</span>
-              <button
-                className="hidden group-hover:inline text-dim hover:text-primary"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  if (activeId) close(activeId, tab.path)
-                }}
-              >
-                {'\u00d7'}
-              </button>
-            </>
-          ) : (
-            <button
-              className="text-dim hover:text-primary"
-              onClick={(e) => {
-                e.stopPropagation()
-                if (activeId) close(activeId, tab.path)
-              }}
-            >
-              {'\u00d7'}
-            </button>
+          {tab.dirty && (
+            <span className="text-primary group-hover:hidden">{'\u25cf'}</span>
           )}
+          <button
+            className="hidden group-hover:inline text-dim hover:text-primary"
+            onClick={(e) => {
+              e.stopPropagation()
+              if (activeId) close(activeId, tab.path)
+            }}
+          >
+            {'\u00d7'}
+          </button>
         </div>
       ))}
       <div className="flex-1" />

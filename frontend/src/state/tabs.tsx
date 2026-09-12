@@ -79,6 +79,10 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const openFile = useCallback(
     async (projectId: string, path: string) => {
+      const existing = tabsRef.current[projectId]?.open.find(
+        (t) => t.path === path,
+      )
+      const needFetch = !existing || existing.dirContent == null
       setTabsByProject((prev) => {
         const st = prev[projectId] ?? { open: [], active: null }
         if (st.open.some((t) => t.path === path)) {
@@ -90,6 +94,7 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
           [projectId]: { open: [...st.open, tab], active: path },
         }
       })
+      if (!needFetch) return
       try {
         const content = await App.ReadFile(path)
         setTabsByProject((prev) => {

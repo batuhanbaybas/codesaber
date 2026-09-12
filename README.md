@@ -57,3 +57,7 @@ Take a moment to familiarize yourself with your project structure:
 4. When ready, build your application with `wails3 build`.
 
 Happy coding with Wails3! If you encounter any issues or have questions, don't hesitate to consult the documentation or reach out to the Wails community.
+
+## Regenerating Wails bindings
+
+Always regenerate bindings with `wails3 task generate:bindings` (equivalent to `wails3 generate bindings -clean=true -ts -i`) — plain `wails3 generate bindings` emits `.js` and would clobber the committed `.ts` bindings.
