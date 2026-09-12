@@ -90,11 +90,26 @@ type App struct {
 	pendingEmit map[string]bool
 	agents      map[string]*agentSession
 
-	// lspMu guards LSP bookkeeping (per-path versions and diag throttles).
+	// lspMu guards LSP bookkeeping (per-path versions, diag throttles and
+	// the last emitted LSP state per project).
 	lspMu          sync.Mutex
 	lspVersions    map[string]map[string]int
 	lastDiagEmit   map[string]time.Time
 	lspPendingDiag map[string]bool
+	// lspPendingDiagPath/Diags hold the LATEST diagnostics seen while a
+	// trailing emit is armed, so the trailing timer emits post-resolution
+	// state rather than the arm-time value.
+	lspPendingDiagPath   map[string]string
+	lspPendingDiagLatest map[string][]lsp.Diagnostic
+	// lastLSPState tracks the last emitted (running, reason) per project so
+	// emitLSPState only fires on actual state changes.
+	lastLSPState map[string]lspState
+}
+
+// lspState is the dedup key for EventLSPState emissions.
+type lspState struct {
+	running bool
+	reason  string
 }
 
 // New wires the engines together. sink receives all backend→UI events.
@@ -105,17 +120,20 @@ func New(sink adapter.EventSink) *App {
 // NewWith is New with an injectable recents store path (for tests).
 func NewWith(sink adapter.EventSink, storePath string) *App {
 	a := &App{
-		sink:           sink,
-		reg:            project.NewRegistry(func() {}),
-		store:          project.NewStore(storePath),
-		buf:            editor.New(),
-		chats:          agentstore.NewStore(),
-		watchers:       map[string]*fswatch.Watcher{},
-		closed:         map[string]bool{},
-		agents:         map[string]*agentSession{},
-		lspVersions:    map[string]map[string]int{},
-		lastDiagEmit:   map[string]time.Time{},
-		lspPendingDiag: map[string]bool{},
+		sink:                 sink,
+		reg:                  project.NewRegistry(func() {}),
+		store:                project.NewStore(storePath),
+		buf:                  editor.New(),
+		chats:                agentstore.NewStore(),
+		watchers:             map[string]*fswatch.Watcher{},
+		closed:               map[string]bool{},
+		agents:               map[string]*agentSession{},
+		lspVersions:          map[string]map[string]int{},
+		lastDiagEmit:         map[string]time.Time{},
+		lspPendingDiag:       map[string]bool{},
+		lspPendingDiagPath:   map[string]string{},
+		lspPendingDiagLatest: map[string][]lsp.Diagnostic{},
+		lastLSPState:         map[string]lspState{},
 	}
 	a.lspMgr = lsp.NewManager(a.onLSPDiags)
 	return a
@@ -193,8 +211,9 @@ func (a *App) ForgetRecent(root string) {
 	a.store.Forget(root)
 }
 
-// RemoveProject closes the project: registry removal, watcher shutdown and
-// "project.removed" emission.
+// RemoveProject closes the project: registry removal, LSP shutdown, watcher
+// shutdown and "project.removed" emission. LSP-stop failure never aborts the
+// remaining cleanup steps — the project is going away either way.
 func (a *App) RemoveProject(id string) error {
 	p, err := a.reg.Get(id)
 	if err != nil {
@@ -203,13 +222,14 @@ func (a *App) RemoveProject(id string) error {
 	if err := a.reg.Remove(id); err != nil {
 		return err
 	}
-	if err := a.lspMgr.Remove(id); err != nil {
-		return err
-	}
+	lspErr := a.lspMgr.Remove(id)
 	a.lspMu.Lock()
 	delete(a.lspVersions, id)
 	delete(a.lastDiagEmit, id)
 	delete(a.lspPendingDiag, id)
+	delete(a.lspPendingDiagPath, id)
+	delete(a.lspPendingDiagLatest, id)
+	delete(a.lastLSPState, id)
 	a.lspMu.Unlock()
 	a.CloseWatcher(id)
 	_ = a.ACPStop(id)
@@ -217,7 +237,7 @@ func (a *App) RemoveProject(id string) error {
 	if len(a.reg.List()) == 0 {
 		adapter.ShowWelcomeWindow()
 	}
-	return nil
+	return lspErr
 }
 
 // CloseWatcher stops and releases the watcher for projectID and marks the
@@ -555,30 +575,23 @@ func (a *App) onLSPDiags(projectID, uri string, diags []lsp.Diagnostic) {
 
 // emitLSPDiag applies the leading/trailing throttle (windows per project)
 // before emitting EventLSPDiag, so diagnostic bursts cost one event each.
+// While a trailing emit is armed, each new burst overwrites the stored
+// path/diagnostics; the trailing timer therefore emits the LATEST state
+// (post-resolution), never the arm-time snapshot.
 func (a *App) emitLSPDiag(projectID, path string, diags []lsp.Diagnostic) {
 	a.lspMu.Lock()
 	if time.Since(a.lastDiagEmit[projectID]) < lspDiagThrottle {
 		if !a.lspPendingDiag[projectID] {
 			a.lspPendingDiag[projectID] = true
 			wait := lspDiagThrottle - time.Since(a.lastDiagEmit[projectID])
-			latest := diags
-			lspPath := path
+			a.lspPendingDiagPath[projectID] = path
+			a.lspPendingDiagLatest[projectID] = diags
 			a.lspMu.Unlock()
-			time.AfterFunc(wait, func() {
-				a.lspMu.Lock()
-				if !a.lspPendingDiag[projectID] {
-					a.lspMu.Unlock()
-					return
-				}
-				a.lspPendingDiag[projectID] = false
-				a.lastDiagEmit[projectID] = time.Now()
-				a.lspMu.Unlock()
-				a.sink.Emit(EventLSPDiag, map[string]any{
-					"projectId": projectID, "path": lspPath, "diagnostics": latest,
-				})
-			})
+			time.AfterFunc(wait, func() { a.emitLSPDiagTrailing(projectID) })
 			return
 		}
+		a.lspPendingDiagPath[projectID] = path
+		a.lspPendingDiagLatest[projectID] = diags
 		a.lspMu.Unlock()
 		return
 	}
@@ -590,8 +603,41 @@ func (a *App) emitLSPDiag(projectID, path string, diags []lsp.Diagnostic) {
 	})
 }
 
-// emitLSPState reports running/reason for the project's gopls lifecycle.
+// emitLSPDiagTrailing fires the armed trailing emit with the latest stored
+// path/diagnostics for the project.
+func (a *App) emitLSPDiagTrailing(projectID string) {
+	a.lspMu.Lock()
+	if !a.lspPendingDiag[projectID] {
+		a.lspMu.Unlock()
+		return
+	}
+	a.lspPendingDiag[projectID] = false
+	a.lastDiagEmit[projectID] = time.Now()
+	path := a.lspPendingDiagPath[projectID]
+	diags := a.lspPendingDiagLatest[projectID]
+	delete(a.lspPendingDiagPath, projectID)
+	delete(a.lspPendingDiagLatest, projectID)
+	a.lspMu.Unlock()
+
+	a.sink.Emit(EventLSPDiag, map[string]any{
+		"projectId": projectID, "path": path, "diagnostics": diags,
+	})
+}
+
+// emitLSPState reports running/reason for the project's gopls lifecycle,
+// but only when the (running, reason) pair actually changed since the last
+// emission for the project — repeated didOpen flows must not spam lsp.state.
 func (a *App) emitLSPState(projectID string, running bool, reason string) {
+	a.lspMu.Lock()
+	prev, seen := a.lastLSPState[projectID]
+	next := lspState{running: running, reason: reason}
+	if seen && prev == next {
+		a.lspMu.Unlock()
+		return
+	}
+	a.lastLSPState[projectID] = next
+	a.lspMu.Unlock()
+
 	payload := map[string]any{"projectId": projectID, "running": running}
 	if reason != "" {
 		payload["reason"] = reason

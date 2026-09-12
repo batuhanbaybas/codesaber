@@ -177,11 +177,13 @@ func (c *Client) write(m message) error {
 }
 
 func (c *Client) readLoop() {
+	// module-internal debug tracing (LSP_DEBUG=1): framed traffic, stderr.
+	debug := os.Getenv("LSP_DEBUG") != ""
 	reader := &byteReader{r: c.stdout}
 	for {
 		body, err := readMessage(reader)
-		if os.Getenv("LSP_DEBUG") != "" {
-			fmt.Printf("readLoop frame: %q err=%v\n", body, err)
+		if debug {
+			fmt.Fprintf(os.Stderr, "lsp: readLoop frame: %q err=%v\n", truncated(body), err)
 		}
 		if err != nil {
 			c.failAllPending(fmt.Errorf("lsp: stream error: %w", err))
@@ -191,6 +193,13 @@ func (c *Client) readLoop() {
 		if err != nil {
 			c.failAllPending(err)
 			return
+		}
+		if debug {
+			method := msg.Method
+			if method == "" {
+				method = fmt.Sprintf("<resp %s>", msg.ID)
+			}
+			fmt.Fprintf(os.Stderr, "lsp: msg method=%s paramsLen=%d\n", method, len(msg.Params))
 		}
 		switch {
 		case msg.isResp():
@@ -282,8 +291,11 @@ func (c *Client) DidClose(uri string) error {
 }
 
 // Definition resolves textDocument/definition. Handles null (no results),
-// single Location, and array results. LocationLink arrays are decoded into
-// their targetURI/targetSelection fields via best effort.
+// single Location, and array results. LocationLink arrays (servers that
+// advertise linkSupport) are mapped onto Locations with URI = targetUri and
+// Range = targetSelection — the precise symbol span, which is what
+// go-to-definition should reveal — falling back to targetRange when the
+// server omits targetSelection.
 func (c *Client) Definition(ctx context.Context, uri string, line, char int32) ([]Location, error) {
 	raw, err := c.request(ctx, "textDocument/definition", positionParams(uri, line, char))
 	if err != nil {
@@ -301,17 +313,22 @@ func (c *Client) Definition(ctx context.Context, uri string, line, char int32) (
 	if err := json.Unmarshal(trimmed, &locs); err == nil {
 		return locs, nil
 	}
-	// LocationLink[]: map to Locations via targetUri/targetSelection.
+	// LocationLink[]: map to Locations (see doc comment above).
 	var links []struct {
-		TargetURI   string `json:"targetUri"`
-		TargetRange Range  `json:"targetSelection"`
+		TargetURI       string `json:"targetUri"`
+		TargetRange     Range  `json:"targetRange"`
+		TargetSelection Range  `json:"targetSelection"`
 	}
 	if err := json.Unmarshal(trimmed, &links); err != nil {
 		return nil, fmt.Errorf("lsp: definition: unexpected result shape %s", truncated(raw))
 	}
 	out := make([]Location, 0, len(links))
 	for _, l := range links {
-		out = append(out, Location{URI: l.TargetURI, Range: l.TargetRange})
+		r := l.TargetSelection
+		if (r == Range{}) {
+			r = l.TargetRange
+		}
+		out = append(out, Location{URI: l.TargetURI, Range: r})
 	}
 	return out, nil
 }

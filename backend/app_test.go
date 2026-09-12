@@ -595,6 +595,57 @@ func TestRemoveProject_StopsWatcher(t *testing.T) {
 	}
 }
 
+func TestEmitLSPDiag_TrailingCarriesLatestPath(t *testing.T) {
+	app, sink := newTestApp(t)
+	pid := "p1"
+
+	// leading edge: first path emits immediately
+	d1 := []lsp.Diagnostic{{Message: "first"}}
+	app.emitLSPDiag(pid, "/w/a.go", d1)
+	ev, ok := sinkEmit(sink.snapshot(), "lsp.diag")
+	if !ok {
+		t.Fatal("expected leading lsp.diag emit")
+	}
+	payload, ok := ev.payload.(map[string]any)
+	if !ok || payload["path"] != "/w/a.go" {
+		t.Fatalf("leading payload = %#v", ev.payload)
+	}
+
+	// two bursts for DIFFERENT paths inside the throttle window; the
+	// trailing emit must carry the LATEST path's diagnostics, not the
+	// arm-time (first path) value.
+	d2 := []lsp.Diagnostic{{Message: "second"}}
+	d3 := []lsp.Diagnostic{{Message: "third"}}
+	app.emitLSPDiag(pid, "/w/b.go", d2) // arms trailing timer
+	app.emitLSPDiag(pid, "/w/c.go", d3) // overwrites pending latest
+
+	deadline := time.Now().Add(2 * time.Second)
+	var trailing map[string]any
+	for time.Now().Before(deadline) {
+		evs := sink.snapshot()
+		if len(evs) >= 2 {
+			trailing, ok = evs[len(evs)-1].payload.(map[string]any)
+			if ok && trailing["path"] == "/w/c.go" {
+				break
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if trailing == nil || trailing["path"] != "/w/c.go" {
+		t.Fatalf("trailing emit did not carry latest path: %#v", trailing)
+	}
+	ds, ok := trailing["diagnostics"].([]lsp.Diagnostic)
+	if !ok || len(ds) != 1 || ds[0].Message != "third" {
+		t.Fatalf("trailing diagnostics = %#v", trailing["diagnostics"])
+	}
+
+	// exactly two emits total (leading + trailing)
+	time.Sleep(lspDiagThrottle + 100*time.Millisecond)
+	if n := countEventsNamed(sink.snapshot(), "lsp.diag"); n != 2 {
+		t.Fatalf("expected exactly 2 lsp.diag events, got %d", n)
+	}
+}
+
 // buildFakeLSPApp compiles the lspfake test server (backend/lsp/testdata) for
 // facade tests that exercise the real subprocess path end to end.
 func buildFakeLSPApp(t *testing.T) string {

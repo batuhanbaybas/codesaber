@@ -26,11 +26,20 @@ export interface LSPStateEvent {
 
 // Version bookkeeping and 300ms didChange debounce timers are keyed on
 // projectId\0path; full-content sync means no range diffing is needed.
+// coldQueue holds didChange calls made while the project's server was still
+// starting (backend answered "no running server"); the latest content per
+// path is flushed on the next successful didOpen/ensure.
 const versions = new Map<string, number>()
 const changeTimers = new Map<string, number>()
 const pendingContent = new Map<string, string>()
 const pendingProject = new Map<string, string>()
 const pendingPath = new Map<string, string>()
+const coldQueue = new Map<string, {
+  projectId: string
+  path: string
+  version: number
+  content: string
+}>()
 
 const key = (projectId: string, path: string) => `${projectId}\0${path}`
 
@@ -40,12 +49,47 @@ const nextVersion = (k: string) => {
   return v
 }
 
+// sendDidChange delivers a full-content didChange, queueing it when the
+// server is not running yet (cold start) so the edit is not lost.
+const sendDidChange = (
+  projectId: string,
+  path: string,
+  version: number,
+  content: string,
+): void => {
+  App.LSPDidChange(projectId, path, version, content).catch((e: unknown) => {
+    if (String(e).includes('no running server')) {
+      coldQueue.set(key(projectId, path), { projectId, path, version, content })
+    }
+  })
+}
+
+// flushColdQueue drains queued cold-start edits; latest per path wins.
+// Called after a successful didOpen so the server starts from current text.
+const flushColdQueue = (projectId: string, path: string): void => {
+  const k = key(projectId, path)
+  const q = coldQueue.get(k)
+  if (!q) return
+  coldQueue.delete(k)
+  sendDidChange(q.projectId, q.path, q.version, q.content)
+}
+
 export const didOpen = (
   projectId: string,
   path: string,
   content: string,
 ): Promise<void> => {
-  return App.LSPDidOpen(projectId, path, nextVersion(key(projectId, path)), content)
+  const v = nextVersion(key(projectId, path))
+  return App.LSPDidOpen(projectId, path, v, content).then(() =>
+    flushColdQueue(projectId, path),
+  )
+}
+
+export const ensure = async (projectId: string): Promise<void> => {
+  await App.LSPEnsure(projectId)
+  for (const q of [...coldQueue.values()]) {
+    if (q.projectId === projectId) flushColdQueue(projectId, q.path)
+  }
 }
 
 export const didChange = (
@@ -68,7 +112,7 @@ export const didChange = (
       const ppath = pendingPath.get(k)
       const text = pendingContent.get(k)
       if (!proj || !ppath) return
-      App.LSPDidChange(proj, ppath, v, text ?? '').catch(() => {})
+      sendDidChange(proj, ppath, v, text ?? '')
     }, 300),
   )
 }
@@ -86,14 +130,24 @@ export const flushDidChange = (projectId: string, path: string): void => {
   const ppath = pendingPath.get(k)
   const text = pendingContent.get(k)
   if (v === undefined || !proj || !ppath || text === undefined) return
-  App.LSPDidChange(proj, ppath, v, text).catch(() => {})
+  sendDidChange(proj, ppath, v, text)
 }
 
 export const didSave = (projectId: string, path: string, content: string) =>
   App.LSPDidSave(projectId, path, content)
 
-export const didClose = (projectId: string, path: string) =>
-  App.LSPDidClose(projectId, path).catch(() => {})
+export const didClose = (projectId: string, path: string) => {
+  const k = key(projectId, path)
+  const timer = changeTimers.get(k)
+  if (timer !== undefined) window.clearTimeout(timer)
+  versions.delete(k)
+  changeTimers.delete(k)
+  pendingContent.delete(k)
+  pendingProject.delete(k)
+  pendingPath.delete(k)
+  coldQueue.delete(k)
+  return App.LSPDidClose(projectId, path).catch(() => {})
+}
 
 export const definition = (
   projectId: string,
@@ -114,8 +168,6 @@ export const symbols = (
   projectId: string,
   path: string,
 ): Promise<DocumentSymbol[] | null> => App.LSPSymbols(projectId, path)
-
-export const ensure = (projectId: string) => App.LSPEnsure(projectId)
 
 // hoverText flattens the hover result's raw JSON contents into plain text for
 // a tooltip: MarkupContent → value, string → itself, array → joined lines.

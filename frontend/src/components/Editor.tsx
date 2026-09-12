@@ -103,7 +103,7 @@ const diagsField = StateField.define<Map<number, LSP.Diagnostic[]>>({
   update(lineDiags, tr) {
     let next = lineDiags
     for (const e of tr.effects) {
-      if (e.value === setDiagEffect) {
+      if (e.is(setDiagEffect)) {
         next = new Map()
         if (e.value) {
           for (const d of e.value) {
@@ -122,8 +122,8 @@ const tipField = StateField.define<Tooltip | null>({
   create: () => null,
   update(tip, tr) {
     for (const e of tr.effects) {
-      if (e.value === activeTipEffect) tip = e.value
-      if (e.value === setDiagEffect) tip = null
+      if (e.is(activeTipEffect)) tip = e.value
+      if (e.is(setDiagEffect)) tip = null
     }
     return tip
   },

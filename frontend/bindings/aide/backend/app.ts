@@ -305,8 +305,9 @@ export function RecentProjects(): $CancellablePromise<project$0.Recent[] | null>
 }
 
 /**
- * RemoveProject closes the project: registry removal, watcher shutdown and
- * "project.removed" emission.
+ * RemoveProject closes the project: registry removal, LSP shutdown, watcher
+ * shutdown and "project.removed" emission. LSP-stop failure never aborts the
+ * remaining cleanup steps — the project is going away either way.
  */
 export function RemoveProject(id: string): $CancellablePromise<void> {
     return $Call.ByID(1659478425, id);
