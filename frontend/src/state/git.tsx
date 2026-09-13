@@ -27,6 +27,8 @@ interface GitContextValue {
   fetchDiff: (key: string) => void
   stage: (projectId: string, paths: string[]) => Promise<void>
   unstage: (projectId: string, paths: string[]) => Promise<void>
+  stageHunks: (projectId: string, path: string, hunkIdx: number[]) => Promise<void>
+  unstageHunks: (projectId: string, path: string, hunkIdx: number[]) => Promise<void>
   commit: (projectId: string, message: string) => Promise<void>
 }
 
@@ -228,6 +230,43 @@ export const GitProvider: React.FC<{ children: React.ReactNode }> = ({
     [mutate],
   )
 
+  // Hunk-level mutations share the mutate flow (invalidate diffs + refresh);
+  // per-hunk errors are surfaced to the caller for inline row rendering.
+  const mutateHunks = useCallback(
+    async (
+      projectId: string,
+      fn: (path: string, idx: number[]) => Promise<void>,
+      path: string,
+      hunkIdx: number[],
+    ) => {
+      try {
+        await fn(path, hunkIdx)
+        setErrors((prev) => ({ ...prev, [projectId]: '' }))
+      } catch (e) {
+        setErrors((prev) => ({
+          ...prev,
+          [projectId]: String(e),
+        }))
+        throw e
+      }
+      invalidateDiffs(projectId, [path])
+      await refresh(projectId)
+    },
+    [refresh, invalidateDiffs],
+  )
+
+  const stageHunks = useCallback(
+    (projectId: string, path: string, hunkIdx: number[]) =>
+      mutateHunks(projectId, (p, idx) => App.GitStageHunks(projectId, p, idx), path, hunkIdx),
+    [mutateHunks],
+  )
+
+  const unstageHunks = useCallback(
+    (projectId: string, path: string, hunkIdx: number[]) =>
+      mutateHunks(projectId, (p, idx) => App.GitUnstageHunks(projectId, p, idx), path, hunkIdx),
+    [mutateHunks],
+  )
+
   const commit = useCallback(
     async (projectId: string, message: string) => {
       try {
@@ -266,6 +305,8 @@ export const GitProvider: React.FC<{ children: React.ReactNode }> = ({
         fetchDiff,
         stage,
         unstage,
+        stageHunks,
+        unstageHunks,
         commit,
       }}
     >

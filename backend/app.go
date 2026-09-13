@@ -527,6 +527,35 @@ func (a *App) GitUnstage(projectID string, paths []string) error {
 	return e.Unstage(paths)
 }
 
+// GitStageHunks stages selected hunks (0-based indices into the file's
+// unified diff) via the git binary. Requires `git` on PATH; otherwise it
+// fails fast with a clear availability error.
+func (a *App) GitStageHunks(projectID, path string, hunkIdx []int) error {
+	root, err := a.resolveRoot(projectID)
+	if err != nil {
+		return err
+	}
+	if err := git.StageHunks(root, path, hunkIdx); err != nil {
+		return err
+	}
+	go a.emitGitStatus(projectID)
+	return nil
+}
+
+// GitUnstageHunks reverts selected staged hunks (0-based indices into the
+// file's staged diff) out of the index via the git binary.
+func (a *App) GitUnstageHunks(projectID, path string, hunkIdx []int) error {
+	root, err := a.resolveRoot(projectID)
+	if err != nil {
+		return err
+	}
+	if err := git.UnstageHunks(root, path, hunkIdx); err != nil {
+		return err
+	}
+	go a.emitGitStatus(projectID)
+	return nil
+}
+
 // GitCommit commits staged changes with the fixed "aide <aide@local>" identity.
 func (a *App) GitCommit(projectID, message string) error {
 	e, err := a.gitEngine(projectID)

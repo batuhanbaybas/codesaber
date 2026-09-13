@@ -3,9 +3,7 @@ package git
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 )
 
@@ -180,13 +178,7 @@ func applyPatch(root, patch string, reverse bool) error {
 		if len(tail) > stderrTailCap {
 			tail = tail[len(tail)-stderrTailCap:]
 		}
-		// Retry without --unidiff-zero for git versions that dislike it on
-		// context-trailing hunks.
 		return fmt.Errorf("git apply: %w: %s", err, tail)
 	}
 	return nil
 }
-
-// ensure path is slash-separated for git CLI (Windows-friendly).
-var _ = filepath.ToSlash
-var _ = os.Environ

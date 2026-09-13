@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -368,6 +369,104 @@ func TestGitFacadeStatusAndStage(t *testing.T) {
 	}
 	if len(diff.Hunks) == 0 {
 		t.Fatalf("GitDiff unstaged empty: %+v", diff)
+	}
+}
+
+func TestGitFacadeStageHunks(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not found")
+	}
+	// Repo with a multi-paragraph file so re-editing yields >=2 hunks.
+	root := initRepoGit(t)
+	var sb strings.Builder
+	for i := 1; i <= 30; i++ {
+		sb.WriteString("para")
+		sb.WriteString(strings.Repeat("a", 40))
+		sb.WriteString(" line ")
+		sb.WriteString(strconv.Itoa(i))
+		sb.WriteString("\n")
+		if i%3 == 0 {
+			sb.WriteString("\n")
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "big.txt"), []byte(sb.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitCmd(t, root, "add", ".")
+	runGitCmd(t, root, "commit", "-q", "-m", "big")
+
+	app, sink := newTestApp(t)
+	p, err := app.OpenProject(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid := p.ID
+
+	// Rewrite: distant edits → >=2 hunks.
+	raw, err := os.ReadFile(filepath.Join(root, "big.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	lines[0] = "EDITED-FIRST-LINE"
+	lines[9] = "EDITED-MID-LINE"
+	lines[len(lines)-1] = "EDITED-LAST-LINE"
+	if err := os.WriteFile(filepath.Join(root, "big.txt"), []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stage the first hunk only.
+	if err := app.GitStageHunks(pid, "big.txt", []int{0}); err != nil {
+		t.Fatalf("GitStageHunks: %v", err)
+	}
+	st, err := app.GitStatus(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Staged) != 1 || st.Staged[0].Path != "big.txt" {
+		t.Fatalf("staged after hunk stage: %+v", st.Staged)
+	}
+	diff, err := app.GitDiff(pid, "big.txt", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diff.Hunks) != 1 || len(diff.Hunks) == 0 {
+		t.Fatalf("expected 1 staged hunk, got %+v", diff.Hunks)
+	}
+
+	// Unstage it → index matches HEAD (no staged diff).
+	if err := app.GitUnstageHunks(pid, "big.txt", []int{0}); err != nil {
+		t.Fatalf("GitUnstageHunks: %v", err)
+	}
+	st, err = app.GitStatus(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Staged) != 0 {
+		t.Fatalf("staged should be empty after hunk unstage: %+v", st.Staged)
+	}
+
+	// Unknown project → error.
+	if err := app.GitStageHunks("missing-id", "big.txt", []int{0}); err == nil {
+		t.Fatal("unknown project should error")
+	}
+
+	// git.status event fired after hunk ops.
+	sink.waitFor(t, "git.status", 5*time.Second)
+}
+
+// runGitCmd runs git with test identity; helper for facade tests.
+func runGitCmd(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
+		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
 	}
 }
 

@@ -203,6 +203,15 @@ export function GitStage(projectID: string, paths: string[] | null): $Cancellabl
 }
 
 /**
+ * GitStageHunks stages selected hunks (0-based indices into the file's
+ * unified diff) via the git binary. Requires `git` on PATH; otherwise it
+ * fails fast with a clear availability error.
+ */
+export function GitStageHunks(projectID: string, path: string, hunkIdx: number[] | null): $CancellablePromise<void> {
+    return $Call.ByID(3267682843, projectID, path, hunkIdx);
+}
+
+/**
  * GitStats computes on-demand per-file [additions, deletions]; capped at
  * maxStatsFiles paths per call to keep it cheap.
  */
@@ -222,6 +231,14 @@ export function GitStatus(projectID: string): $CancellablePromise<git$0.Status> 
  */
 export function GitUnstage(projectID: string, paths: string[] | null): $CancellablePromise<void> {
     return $Call.ByID(1116628283, projectID, paths);
+}
+
+/**
+ * GitUnstageHunks reverts selected staged hunks (0-based indices into the
+ * file's staged diff) out of the index via the git binary.
+ */
+export function GitUnstageHunks(projectID: string, path: string, hunkIdx: number[] | null): $CancellablePromise<void> {
+    return $Call.ByID(3791099396, projectID, path, hunkIdx);
 }
 
 /**

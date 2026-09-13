@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import * as App from '../../bindings/aide/backend/app'
-import type { ChangeStatus } from '../../bindings/aide/backend/git/models'
+import type { ChangeStatus, DiffHunk } from '../../bindings/aide/backend/git/models'
 import type { LogEntry } from '../../bindings/aide/backend/git/models'
 import { useProjects } from '../state/projects'
 import { useAgent } from '../state/agent'
@@ -117,65 +117,202 @@ const FileRow: React.FC<{
   stats?: { a: number; d: number }
   onRowClick: (r: Row) => void
   onOpenDiff: (r: Row) => void
-}> = ({ r, stats, onRowClick, onOpenDiff }) => {
+  onStageHunks: (r: Row, idx: number[]) => Promise<void>
+  onUnstageHunks: (r: Row, idx: number[]) => Promise<void>
+}> = ({ r, stats, onRowClick, onOpenDiff, onStageHunks, onUnstageHunks }) => {
   const base = r.rel.slice(r.rel.lastIndexOf('/') + 1)
   const dir = r.rel.slice(0, r.rel.length - base.length)
   const badge = LETTER_BADGE[statusLetter(r.letter)]
   const showSize = r.untracked && r.size !== undefined && (isBinaryPath(r.path) || r.size > 100 * 1024)
+  const [expanded, setExpanded] = useState(false)
+  const [hunks, setHunks] = useState<DiffHunk[] | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [hunkError, setHunkError] = useState<string | null>(null)
+  const [rowErr, setRowErr] = useState<string | null>(null)
+  const [doneIdx, setDoneIdx] = useState<Set<number>>(new Set())
+  const { fetchDiff, diffs } = useGit()
+  const { activeId } = useProjects()
+
+  // Load hunks lazily on first expand via the provider's diff fetch/cache.
+  useEffect(() => {
+    if (!expanded || !activeId) return
+    setHunkError(null)
+    setLoading(true)
+    fetchDiff(diffKey(activeId, r.path, r.staged))
+  }, [expanded, activeId, r.path, r.staged, fetchDiff])
+
+  useEffect(() => {
+    if (!expanded || !activeId) return
+    const patch = diffs[diffKey(activeId, r.path, r.staged)]
+    if (patch) {
+      setHunks(patch.hunks ?? [])
+      setLoading(false)
+    }
+  }, [expanded, activeId, r.path, r.staged, diffs, diffs && Object.keys(diffs).length])
+
+  const applyHunk = (idx: number) => {
+    if (!activeId) return
+    setHunkError(null)
+    setRowErr(null)
+    const fn = r.staged ? onUnstageHunks : onStageHunks
+    fn(r, [idx])
+      .then(() => setDoneIdx((prev) => new Set(prev).add(idx)))
+      .catch((e) => setRowErr(String(e)))
+  }
+
+  const stageAll = () => {
+    if (!activeId) return
+    setHunkError(null)
+    setRowErr(null)
+    const idxs = (hunks ?? []).map((_, i) => i)
+    const fn = r.staged ? onUnstageHunks : onStageHunks
+    fn(r, idxs)
+      .then(() => setDoneIdx(new Set(idxs)))
+      .catch((e) => setRowErr(String(e)))
+  }
+
   return (
-    <div
-      className="flex items-center gap-2 pl-5 pr-3 h-7 text-xs cursor-pointer hover:bg-white/4"
-      title={r.staged ? 'Click to unstage' : 'Click to stage'}
-      onClick={() => onRowClick(r)}
-    >
-      {langChip(r.rel)}
-      <span
-        className="truncate flex-1 min-w-0"
-        title={r.rel}
-        onClick={(e) => {
-          e.stopPropagation()
-          onOpenDiff(r)
-        }}
+    <div>
+      <div
+        className="flex items-center gap-2 pl-5 pr-3 h-7 text-xs cursor-pointer hover:bg-white/4"
+        title={r.staged ? 'Click to unstage' : 'Click to stage'}
+        onClick={() => onRowClick(r)}
       >
-        {dir && <span className="text-dim">{dir}</span>}
-        <span className="text-white hover:underline">{base}</span>
-      </span>
-      {showSize ? (
-        <span className="font-mono text-[11px] tabular-nums text-dim shrink-0">
-          {humanizeSize(r.size ?? 0)}
+        {/* Chevron left of the language chip: toggles inline hunk list */}
+        <button
+          className="text-dim hover:text-primary shrink-0 w-3 flex items-center justify-center"
+          title={expanded ? 'Collapse hunks' : 'Expand hunks'}
+          onClick={(e) => {
+            e.stopPropagation()
+            setExpanded((o) => !o)
+          }}
+        >
+          <span
+            className={
+              'inline-block transition-transform text-[10px] ' + (expanded ? 'rotate-90' : '')
+            }
+          >
+            ›
+          </span>
+        </button>
+        {langChip(r.rel)}
+        <span
+          className="truncate flex-1 min-w-0"
+          title={r.rel}
+          onClick={(e) => {
+            e.stopPropagation()
+            onOpenDiff(r)
+          }}
+        >
+          {dir && <span className="text-dim">{dir}</span>}
+          <span className="text-white hover:underline">{base}</span>
         </span>
-      ) : (
-        !isBinaryPath(r.path) && (
-          <>
-            {stats && stats.a > 0 && (
-              <span className="font-mono text-[11px] tabular-nums text-[#5dbb63] shrink-0">
-                +{stats.a}
-              </span>
-            )}
-            {stats && stats.d > 0 && (
-              <span className="font-mono text-[11px] tabular-nums text-[#e53c34] shrink-0">
-                -{stats.d}
-              </span>
-            )}
-          </>
-        )
+        {showSize ? (
+          <span className="font-mono text-[11px] tabular-nums text-dim shrink-0">
+            {humanizeSize(r.size ?? 0)}
+          </span>
+        ) : (
+          !isBinaryPath(r.path) && (
+            <>
+              {stats && stats.a > 0 && (
+                <span className="font-mono text-[11px] tabular-nums text-[#5dbb63] shrink-0">
+                  +{stats.a}
+                </span>
+              )}
+              {stats && stats.d > 0 && (
+                <span className="font-mono text-[11px] tabular-nums text-[#e53c34] shrink-0">
+                  -{stats.d}
+                </span>
+              )}
+            </>
+          )
+        )}
+        <span
+          className="w-5 h-5 rounded-[6px] text-[10px] font-semibold flex items-center justify-center shrink-0"
+          style={{ backgroundColor: badge.bg, color: badge.fg }}
+        >
+          {statusLetter(r.letter)}
+        </span>
+      </div>
+      {expanded && (
+        <div className="pb-1 pl-8 pr-3">
+          {loading && <div className="h-6 flex items-center text-dim">Loading hunks…</div>}
+          {!loading && hunkError && (
+            <div className="h-6 flex items-center text-[#ff9999]">{hunkError}</div>
+          )}
+          {!loading && rowErr && (
+            <div className="h-6 flex items-center text-dim truncate" title={rowErr}>
+              {rowErr}
+            </div>
+          )}
+          {!loading && hunks !== null && hunks.length === 0 && (
+            <div className="h-6 flex items-center text-dim">No hunks</div>
+          )}
+          {!loading &&
+            (hunks ?? []).map((h, i) => (
+              <HunkRow
+                key={i}
+                idx={i}
+                hunk={h}
+                staged={r.staged}
+                done={doneIdx.has(i)}
+                onApply={() => applyHunk(i)}
+              />
+            ))}
+          {!loading && (hunks ?? []).length > 0 && (
+            <div className="pt-1">
+              <button
+                className="text-[10px] text-dim hover:text-primary uppercase tracking-wide"
+                title={r.staged ? 'Unstage all hunks' : 'Stage all hunks (whole file)'}
+                onClick={stageAll}
+              >
+                All
+              </button>
+            </div>
+          )}
+        </div>
       )}
-      <span
-        className="w-5 h-5 rounded-[6px] text-[10px] font-semibold flex items-center justify-center shrink-0"
-        style={{ backgroundColor: badge.bg, color: badge.fg }}
-      >
-        {statusLetter(r.letter)}
-      </span>
     </div>
   )
 }
+
+// HunkRow renders one @@ header with its per-section action button; success
+// tints the row green after applying, errors show inline dim.
+const HunkRow: React.FC<{
+  idx: number
+  hunk: DiffHunk
+  staged: boolean
+  done: boolean
+  onApply: () => void
+  err?: string | null
+}> = ({ idx, hunk, staged, done, onApply, err }) => (
+  <div
+    className={
+      'flex items-center gap-2 h-6 text-[11px] rounded px-1 ' +
+      (done ? 'bg-[#1d3324]' : 'hover:bg-white/4')
+    }
+  >
+    <span className="font-mono text-dim truncate flex-1 min-w-0" title={hunk.header}>
+      {hunk.header}
+    </span>
+    {err && <span className="text-dim truncate max-w-[40%]">{err}</span>}
+    <button
+      className="text-dim hover:text-primary shrink-0"
+      title={staged ? 'Unstage hunk' : 'Stage hunk'}
+      onClick={onApply}
+      disabled={done}
+    >
+      {done ? '✓' : staged ? 'Unstage hunk' : 'Stage hunk'}
+    </button>
+  </div>
+)
 
 const seq = (rows: { path: string }[]) =>
   rows.map((r) => r.path).join('\0')
 
 const GitPanel: React.FC = () => {
   const { activeId, projects } = useProjects()
-  const { status, errors, fetchDiff, stage, unstage, commit, setError } =
+  const { status, errors, fetchDiff, stage, unstage, stageHunks, unstageHunks, commit, setError } =
     useGit()
   const { openDiffTab } = useTabs()
   const { state: agentState, generateCommit } = useAgent()
@@ -313,6 +450,16 @@ const GitPanel: React.FC = () => {
     if (!activeId) return
     if (r.staged) unstage(activeId, [r.path])
     else stage(activeId, [r.path])
+  }
+
+  // Hunk actions: rejections propagate for per-row inline error display.
+  const stageSelHunks = (r: Row, idx: number[]) => {
+    if (!activeId) return Promise.resolve()
+    return stageHunks(activeId, r.path, idx)
+  }
+  const unstageSelHunks = (r: Row, idx: number[]) => {
+    if (!activeId) return Promise.resolve()
+    return unstageHunks(activeId, r.path, idx)
   }
 
   const openDiff = (r: Row) => {
@@ -519,6 +666,8 @@ const GitPanel: React.FC = () => {
                 stats={stats[c.path]}
                 onRowClick={toggle}
                 onOpenDiff={openDiff}
+                onStageHunks={stageSelHunks}
+                onUnstageHunks={unstageSelHunks}
               />
             ))}
           </SectionCard>
@@ -540,6 +689,8 @@ const GitPanel: React.FC = () => {
                 stats={stats[c.path]}
                 onRowClick={toggle}
                 onOpenDiff={openDiff}
+                onStageHunks={stageSelHunks}
+                onUnstageHunks={unstageSelHunks}
               />
             ))}
           </SectionCard>
@@ -568,6 +719,8 @@ const GitPanel: React.FC = () => {
                 stats={stats[c.path]}
                 onRowClick={toggle}
                 onOpenDiff={openDiff}
+                onStageHunks={stageSelHunks}
+                onUnstageHunks={unstageSelHunks}
               />
             ))}
           </SectionCard>
