@@ -10,6 +10,7 @@ import ResizeHandle from '../components/ResizeHandle'
 import AgentPanel from '../components/AgentPanel'
 import { ProjectsProvider, useProjects } from '../state/projects'
 import { TabsProvider } from '../state/tabs'
+import { SymbolsProvider } from '../state/symbols'
 import { GitProvider, useGit } from '../state/git'
 import { DiagCounterProvider } from '../state/diagstore'
 import { AgentProvider } from '../state/agent'
@@ -432,19 +433,21 @@ const WorkspaceInner: React.FC = () => {
 const Workspace: React.FC = () => {
   return (
     <ProjectsProvider>
-      <TabsProvider>
-        <GitProvider>
-          <DiagCounterProvider>
-            <AgentProvider>
-              <LayoutProvider>
-                <TerminalProvider>
-                  <WorkspaceInner />
-                </TerminalProvider>
-              </LayoutProvider>
-            </AgentProvider>
-          </DiagCounterProvider>
-        </GitProvider>
-      </TabsProvider>
+      <SymbolsProvider>
+        <TabsProvider>
+          <GitProvider>
+            <DiagCounterProvider>
+              <AgentProvider>
+                <LayoutProvider>
+                  <TerminalProvider>
+                    <WorkspaceInner />
+                  </TerminalProvider>
+                </LayoutProvider>
+              </AgentProvider>
+            </DiagCounterProvider>
+          </GitProvider>
+        </TabsProvider>
+      </SymbolsProvider>
     </ProjectsProvider>
   )
 }

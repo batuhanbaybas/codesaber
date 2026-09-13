@@ -7,6 +7,7 @@ import React, {
 } from 'react'
 import { useProjects } from '../state/projects'
 import { useTabs } from '../state/tabs'
+import { useSymbols, type SymHit } from '../state/symbols'
 import * as App from '../../bindings/aide/backend/app'
 
 interface FileItem {
@@ -18,7 +19,21 @@ interface FileItem {
   rel: string
 }
 
+type Mode = 'files' | 'symbols'
+
+type ResultItem =
+  | { type: 'file'; item: FileItem }
+  | { type: 'symbol'; hit: SymHit }
+
 const maxResults = 50
+
+const kindLabel: Record<SymHit['kind'], string> = {
+  function: 'fn',
+  method: 'm',
+  class: 'class',
+  type: 'type',
+  var: 'var',
+}
 
 // fuzzyScore returns a match score for query against path (case-insensitive
 // subsequence with a contiguous-run bonus), or -1 when not a subsequence.
@@ -43,7 +58,17 @@ const fuzzyScore = (query: string, path: string): number => {
 const QuickOpen: React.FC = () => {
   const { projects, setActive } = useProjects()
   const { openFile, tabsByProject } = useTabs()
+  const {
+    status,
+    progress,
+    stale,
+    count,
+    indexVersion,
+    ensureScanned,
+    query: querySymbols,
+  } = useSymbols()
   const [openState, setOpenState] = useState(false)
+  const [mode, setMode] = useState<Mode>('files')
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(0)
   const [files, setFiles] = useState<FileItem[]>([])
@@ -56,46 +81,60 @@ const QuickOpen: React.FC = () => {
     setSelected(0)
   }, [])
 
-  // Mod-P opens/toggles the quick open. The command palette takes priority:
-  // when it is on screen Mod-P is ignored so the two overlays never stack.
+  const open = useCallback((m: Mode) => {
+    setOpenState((prev) => {
+      if (prev) {
+        setQuery('')
+        setSelected(0)
+        return false
+      }
+      setMode(m)
+      setQuery('')
+      setSelected(0)
+      return true
+    })
+  }, [])
+
+  // Mod-P opens the file finder, Mod-T the symbol finder. The command
+  // palette takes priority: when it is on screen both are ignored so the
+  // overlays never stack.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'p') {
-        e.preventDefault()
-        if (document.querySelector('[data-command-palette]')) return
-        setOpenState((prev) => {
-          if (prev) {
-            setQuery('')
-            setSelected(0)
-            return false
-          }
-          return true
-        })
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey) {
+        const k = e.key.toLowerCase()
+        if (k === 'p' || k === 't') {
+          e.preventDefault()
+          if (document.querySelector('[data-command-palette]')) return
+          open(k === 'p' ? 'files' : 'symbols')
+        }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [open])
 
   // 'aide:quickopen' (activity rail) opens the palette too. Same priority
   // rule as Mod-P: never stack on top of the command palette.
   useEffect(() => {
     const onOpen = () => {
       if (document.querySelector('[data-command-palette]')) return
-      setOpenState(true)
+      open('files')
     }
     window.addEventListener('aide:quickopen', onOpen)
     return () => window.removeEventListener('aide:quickopen', onOpen)
-  }, [])
+  }, [open])
 
   useEffect(() => {
-    if (openState) inputRef.current?.focus()
-  }, [openState])
+    if (openState) {
+      inputRef.current?.focus()
+      if (mode === 'symbols') ensureScanned()
+    }
+  }, [openState, mode, ensureScanned])
 
   // Lazily index every open project via the backend walker; results are
   // cached per project root until the project set changes.
   useEffect(() => {
-    if (!openState) return
+    if (!openState || mode !== 'files') return
     const roots = new Set(projects.map((p) => p.root))
     for (const root of cacheRef.current.keys()) {
       if (!roots.has(root)) cacheRef.current.delete(root)
@@ -134,7 +173,7 @@ const QuickOpen: React.FC = () => {
     return () => {
       disposed = true
     }
-  }, [openState, projects])
+  }, [openState, mode, projects])
 
   // Empty query shows last-opened files: most recently active tab first,
   // projects in recency order.
@@ -163,7 +202,7 @@ const QuickOpen: React.FC = () => {
     return out
   }, [projects, tabsByProject])
 
-  const results = useMemo<FileItem[]>(() => {
+  const fileResults = useMemo<FileItem[]>(() => {
     if (query === '') return recent
     const scored: { item: FileItem; score: number }[] = []
     for (const item of files) {
@@ -179,16 +218,43 @@ const QuickOpen: React.FC = () => {
     return scored.slice(0, maxResults).map((s) => s.item)
   }, [query, files, recent])
 
+  const symbolResults = useMemo<SymHit[]>(() => {
+    if (mode !== 'symbols') return []
+    void indexVersion // re-run when the index changes
+    return querySymbols(query.trim())
+  }, [mode, query, indexVersion, querySymbols])
+
+  const results = useMemo<ResultItem[]>(
+    () =>
+      mode === 'files'
+        ? fileResults.map((item) => ({ type: 'file', item }) as ResultItem)
+        : symbolResults.map((hit) => ({ type: 'symbol', hit }) as ResultItem),
+    [mode, fileResults, symbolResults],
+  )
+
   const selectIdx = Math.min(selected, Math.max(0, results.length - 1))
 
   const pick = useCallback(
-    (item: FileItem) => {
-      setActive(item.projectId)
-      void openFile(item.projectId, item.path)
+    (r: ResultItem) => {
+      if (r.type === 'file') {
+        setActive(r.item.projectId)
+        void openFile(r.item.projectId, r.item.path)
+      } else {
+        setActive(r.hit.projectId)
+        void openFile(r.hit.projectId, r.hit.path, {
+          reveal: { line: r.hit.line - 1, character: r.hit.col - 1 },
+        })
+      }
       close()
     },
     [setActive, openFile, close],
   )
+
+  const switchMode = useCallback((m: Mode) => {
+    setMode(m)
+    setQuery('')
+    setSelected(0)
+  }, [])
 
   const onInputKey = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -209,6 +275,17 @@ const QuickOpen: React.FC = () => {
 
   if (!openState) return null
 
+  const statusLine =
+    mode === 'symbols'
+      ? progress
+        ? `Indexing ${progress.done}/${progress.total}\u2026`
+        : stale
+          ? `${count} symbols \u00b7 stale \u2014 will rescan`
+          : status === 'ready'
+            ? `${count} symbols`
+            : ''
+      : ''
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/40"
@@ -220,35 +297,104 @@ const QuickOpen: React.FC = () => {
         className="mt-[12vh] w-[560px] max-w-[80vw] rounded-lg bg-panel border border-panel shadow-2xl overflow-hidden"
         onKeyDown={onInputKey}
       >
+        <div className="flex items-center gap-1 px-2 pt-2 border-b border-panel">
+          <button
+            className={
+              'px-2 py-1 rounded text-[10px] cursor-default ' +
+              (mode === 'files'
+                ? 'bg-[#373940] text-primary'
+                : 'text-dim hover:text-primary')
+            }
+            onClick={() => switchMode('files')}
+          >
+            Files {'\u2318'}P
+          </button>
+          <button
+            className={
+              'px-2 py-1 rounded text-[10px] cursor-default ' +
+              (mode === 'symbols'
+                ? 'bg-[#373940] text-primary'
+                : 'text-dim hover:text-primary')
+            }
+            onClick={() => switchMode('symbols')}
+          >
+            Symbols {'\u2318'}T
+          </button>
+          {statusLine && (
+            <span className="ml-auto text-[10px] text-dim pr-1">
+              {statusLine}
+            </span>
+          )}
+        </div>
         <input
           ref={inputRef}
           value={query}
           onChange={(e) => {
-            setQuery(e.target.value)
+            const v = e.target.value
+            if (mode === 'files' && v.startsWith('sym:')) {
+              setMode('symbols')
+              setQuery(v.slice(4))
+            } else {
+              setQuery(v)
+            }
             setSelected(0)
           }}
-          placeholder="Search files by name…"
+          placeholder={
+            mode === 'files'
+              ? 'Search files by name\u2026 (sym: for symbols)'
+              : 'Search symbols by name\u2026'
+          }
           className="w-full px-3 py-2.5 bg-transparent outline-none text-primary text-[13px] border-b border-panel placeholder:text-dim"
         />
         <div className="max-h-[40vh] overflow-y-auto py-1">
-          {results.map((item, i) => (
-            <div
-              key={item.projectId + '\0' + item.path}
-              className={
-                'px-3 py-1.5 cursor-default ' +
-                (i === selectIdx ? 'bg-[#373940]' : 'hover:bg-[#2e3037]')
-              }
-              onMouseEnter={() => setSelected(i)}
-              onClick={() => pick(item)}
-            >
-              <div className="text-[12px] text-primary truncate">{item.name}</div>
-              <div className="text-[10px] text-dim truncate">
-                {item.projectName}/{item.rel}
+          {results.map((r, i) =>
+            r.type === 'file' ? (
+              <div
+                key={r.item.projectId + '\0' + r.item.path}
+                className={
+                  'px-3 py-1.5 cursor-default ' +
+                  (i === selectIdx ? 'bg-[#373940]' : 'hover:bg-[#2e3037]')
+                }
+                onMouseEnter={() => setSelected(i)}
+                onClick={() => pick(r)}
+              >
+                <div className="text-[12px] text-primary truncate">
+                  {r.item.name}
+                </div>
+                <div className="text-[10px] text-dim truncate">
+                  {r.item.projectName}/{r.item.rel}
+                </div>
               </div>
-            </div>
-          ))}
+            ) : (
+              <div
+                key={r.hit.projectId + '\0' + r.hit.path + '\0' + r.hit.name + '\0' + r.hit.line}
+                className={
+                  'px-3 py-1.5 cursor-default flex items-baseline gap-2 ' +
+                  (i === selectIdx ? 'bg-[#373940]' : 'hover:bg-[#2e3037]')
+                }
+                onMouseEnter={() => setSelected(i)}
+                onClick={() => pick(r)}
+              >
+                <span className="text-[9px] uppercase text-dim border border-panel rounded px-1 shrink-0">
+                  {kindLabel[r.hit.kind]}
+                </span>
+                <span className="text-[12px] text-primary truncate">
+                  {r.hit.name}
+                </span>
+                <span className="ml-auto text-[10px] text-dim truncate shrink-0">
+                  {r.hit.rel}:{r.hit.line}
+                </span>
+              </div>
+            ),
+          )}
           {results.length === 0 && (
-            <div className="px-3 py-2 text-dim text-[11px]">No matching files</div>
+            <div className="px-3 py-2 text-dim text-[11px]">
+              {mode === 'files'
+                ? 'No matching files'
+                : status === 'scanning'
+                  ? 'Indexing symbols\u2026'
+                  : 'No matching symbols'}
+            </div>
           )}
         </div>
         <div className="px-3 py-1.5 border-t border-panel text-dim text-[10px]">
