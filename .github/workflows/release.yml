@@ -7,7 +7,7 @@ name: release
 on:
   push:
     tags:
-      - "v[0-9]+"
+      - "v*"
   # Manual trigger for dry-runs: only the build jobs run (release/homebrew
   # are guarded on tag refs), so artifacts can be inspected without publishing.
   workflow_dispatch:
