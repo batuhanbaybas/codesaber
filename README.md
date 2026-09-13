@@ -5,7 +5,7 @@
 CodeSaber is a lightweight, AI-native IDE built with **Wails v3 + Go + React + CodeMirror 6**. A modular monolith Go backend powers the editor, git, terminal, and AI agent engines — one tool to ignite your workflow.
 
 <!-- TODO: hero screenshot here -->
-<!-- ![CodeSaber hero](docs/screenshots/hero.png) -->
+![CodeSaber hero](docs/screenshots/screenshot-1789307667.png)
 
 ## ✨ Features
 
