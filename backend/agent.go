@@ -2,6 +2,8 @@ package backend
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -20,7 +22,7 @@ const (
 	EventACPTool       = "acp.tool"       // {projectId, toolCallId, title, kind, status, content}
 	EventACPPermission = "acp.permission" // {projectId, requestId, options}
 	EventACPState      = "acp.state"      // {projectId, state: idle|thinking|harness-down|no-harness}
-	EventACPTranscript = "acp.transcript" // {projectId, entries}
+	EventACPTranscript = "acp.transcript" // {projectId, sessionID, entries}
 )
 
 // Agent status values carried by acp.state.
@@ -219,9 +221,24 @@ func (ag *agentSession) takeTurnText() string {
 	return s
 }
 
-// newChatSessionID mints a persisted-transcript session id.
+// newChatSessionID mints a persisted-transcript session id. The nanosecond
+// timestamp orders sessions lexically; the random suffix rules out collisions
+// between two ids minted within the same nanosecond.
 func newChatSessionID() string {
-	return fmt.Sprintf("ses-%d", time.Now().UnixNano())
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand failure is essentially impossible; fall back to the
+		// fixed digits of the timestamp itself.
+		copy(b[:], fmt.Sprintf("%08x", time.Now().UnixNano()))
+	}
+	return fmt.Sprintf("ses-%d-%s", time.Now().UnixNano(), hex.EncodeToString(b[:]))
+}
+
+// currentChatID returns the persisted session record id under ag.mu.
+func (ag *agentSession) currentChatID() string {
+	ag.mu.Lock()
+	defer ag.mu.Unlock()
+	return ag.chatID
 }
 
 // activeSessionID returns the persisted session record the project's harness
@@ -233,7 +250,7 @@ func (a *App) activeSessionID(projectID string) string {
 	if ag == nil {
 		return ""
 	}
-	return ag.chatID
+	return ag.currentChatID()
 }
 
 // chatIDForEmit resolves the transcript id to show: the agent's active record
@@ -301,9 +318,7 @@ func (a *App) ACPSendPrompt(projectID, text string) error {
 		return errors.New("acp: agent session is down; start a harness first")
 	}
 	// persisted session id: spawn always mints before any append
-	ag.mu.Lock()
-	chatID := ag.chatID
-	ag.mu.Unlock()
+	chatID := ag.currentChatID()
 
 	if err := a.chats.Append(chatID, projectID, agentstore.Entry{Role: "user", Kind: agentstore.KindText, Text: text}); err != nil {
 		return fmt.Errorf("acp: persist user entry: %w", err)
@@ -451,9 +466,7 @@ func (a *App) acpSpawnOnAgent(projectID string, ag *agentSession, profile acp.In
 			toolID := "fsWrite:" + path
 			title := "diff applied ✓ — " + path
 			if ag.noteTool(toolID, title) {
-				ag.mu.Lock()
-				chatID := ag.chatID
-				ag.mu.Unlock()
+				chatID := ag.currentChatID()
 				_ = a.chats.Append(chatID, projectID, agentstore.Entry{
 					Role: "agent", Kind: agentstore.KindTool, Text: title, ToolID: toolID,
 				})
@@ -526,7 +539,7 @@ func (a *App) ACPSessions(projectID string) ([]agentstore.SessionMeta, error) {
 func (a *App) ACPOpenSession(projectID, sessionID string) error {
 	sessions, err := a.chats.ListSessions(projectID)
 	if err != nil {
-		return err
+		return fmt.Errorf("acp: list sessions: %w", err)
 	}
 	found := false
 	for _, s := range sessions {
@@ -551,14 +564,23 @@ func (a *App) ACPOpenSession(projectID, sessionID string) error {
 }
 
 // ACPDeleteSession removes a persisted session. Refuses while a running
-// harness is writing to it.
+// harness is writing to it; afterwards a dead stub's dangling chatID is
+// cleared so the next spawn mints a fresh record.
 func (a *App) ACPDeleteSession(projectID, sessionID string) error {
 	if a.activeSessionID(projectID) == sessionID {
 		if ag := a.agentFor(projectID); ag != nil && ag.get() != nil {
 			return errors.New("acp: cannot delete the active session while the harness is running")
 		}
 	}
-	return a.chats.DeleteSession(sessionID)
+	if err := a.chats.DeleteSession(sessionID); err != nil {
+		return fmt.Errorf("acp: delete session: %w", err)
+	}
+	if ag := a.agentFor(projectID); ag != nil && ag.currentChatID() == sessionID {
+		ag.mu.Lock()
+		ag.chatID = ""
+		ag.mu.Unlock()
+	}
+	return nil
 }
 
 // ACPRenameSession sets a session's display title.
@@ -566,14 +588,21 @@ func (a *App) ACPRenameSession(sessionID, title string) error {
 	return a.chats.RenameSession(sessionID, title)
 }
 
-// ACPClearTranscript deletes every entry of the active/latest session.
+// ACPClearTranscript deletes every entry of the active/latest session. Like
+// ACPDeleteSession it refuses while a running harness is pointed at that
+// session, since deleting the record would strand the harness's writes.
 func (a *App) ACPClearTranscript(projectID string) error {
 	chatID := a.chatIDForEmit(projectID)
 	if chatID == "" {
 		return nil
 	}
+	if a.activeSessionID(projectID) == chatID {
+		if ag := a.agentFor(projectID); ag != nil && ag.get() != nil {
+			return errors.New("acp: cannot clear the active session while the harness is running")
+		}
+	}
 	if err := a.chats.DeleteSession(chatID); err != nil {
-		return err
+		return fmt.Errorf("acp: clear transcript: %w", err)
 	}
 	a.emitTranscript(projectID, chatID)
 	return nil
@@ -721,9 +750,7 @@ func (a *App) acpUpdateHandler(projectID string, ag *agentSession) func(acp.Sess
 				return
 			}
 			if ag.noteTool(id, title) {
-				ag.mu.Lock()
-				chatID := ag.chatID
-				ag.mu.Unlock()
+				chatID := ag.currentChatID()
 				_ = a.chats.Append(chatID, projectID, agentstore.Entry{
 					Role: "agent", Kind: agentstore.KindTool, Text: title, ToolID: id,
 				})

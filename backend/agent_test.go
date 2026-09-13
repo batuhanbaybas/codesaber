@@ -98,6 +98,9 @@ func TestACPStartEmitsTranscriptAndState(t *testing.T) {
 	if _, ok := m["entries"].([]agentstore.Entry); !ok {
 		t.Errorf("transcript entries type = %T, want []agentstore.Entry", m["entries"])
 	}
+	if sid, _ := m["sessionID"].(string); sid == "" {
+		t.Errorf("transcript payload missing sessionID: %#v", m)
+	}
 	st := sink.waitFor(t, EventACPState, 2*time.Second)
 	sm := st.payload.(map[string]any)
 	if sm["state"] != AgentStateIdle {
@@ -948,6 +951,39 @@ func TestACPOpenSessionSwitchesTranscript(t *testing.T) {
 	if !found {
 		t.Fatalf("opened transcript lacks first-session prompt: %#v", entries)
 	}
+}
+
+// TestACPClearTranscriptRefusesWhileRunning verifies ACPClearTranscript
+// refuses while a running harness points at the active session and clears
+// the record after ACPStop.
+func TestACPClearTranscriptRefusesWhileRunning(t *testing.T) {
+	app, _, pid := newAgentTestApp(t)
+	installFakeAgent(t, &fakePrompter{})
+	if err := app.ACPStart(pid, "opencode"); err != nil {
+		t.Fatalf("ACPStart: %v", err)
+	}
+	if err := app.ACPSendPrompt(pid, "clear me"); err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+	sessions, _ := app.ACPSessions(pid)
+	sid := sessions[0].ID
+	if err := app.ACPClearTranscript(pid); err == nil {
+		t.Fatal("want error clearing the active session while the harness runs")
+	}
+	if err := app.ACPStop(pid); err != nil {
+		t.Fatalf("ACPStop: %v", err)
+	}
+	if err := app.ACPClearTranscript(pid); err != nil {
+		t.Fatalf("clear after stop: %v", err)
+	}
+	entries, err := app.chats.Read(sid)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("entries after clear = %#v, want empty", entries)
+	}
+	// the dangling chatID is cleared, so the next spawn mints fresh
 }
 
 // TestACPDeleteSessionRefusesActiveWhileRunning verifies deleting the active

@@ -63,10 +63,31 @@ func NewStore() *Store {
 	return &Store{userConfigDir: os.UserConfigDir, userHomeDir: os.UserHomeDir}
 }
 
-// OpenStore creates, opens and migrates a Store.
+// OpenStore creates, opens and migrates a Store at the user-config chats dir.
 func OpenStore() (*Store, error) {
 	s := NewStore()
 	if err := s.open(); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// OpenStoreAt creates, opens and migrates a Store rooted at dir (tests inject
+// a temp dir so they never touch the real user database).
+func OpenStoreAt(dir string) (*Store, error) {
+	s := NewStore()
+	if err := s.openAt(dir); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// OpenStoreInMemory opens a Store backed by a process-private in-memory
+// database (no persistence). Used as the last-resort fallback when the
+// on-disk store cannot be opened at all.
+func OpenStoreInMemory() (*Store, error) {
+	s := NewStore()
+	if err := s.openInMemory(); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -84,14 +105,19 @@ func (s *Store) chatsDir() (string, error) {
 	return filepath.Join(base, "codesaber", "chats"), nil
 }
 
-// open resolves the db path, creates the schema and imports legacy JSONL.
+// open resolves the db path and opens the store there.
 func (s *Store) open() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	dir, err := s.chatsDir()
 	if err != nil {
 		return fmt.Errorf("agentstore: resolve dir: %w", err)
 	}
+	return s.openAt(dir)
+}
+
+// openAt creates the dir, opens the db and imports legacy JSONL.
+func (s *Store) openAt(dir string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("agentstore: mkdir %s: %w", dir, err)
 	}
@@ -103,22 +129,43 @@ func (s *Store) open() error {
 	if err := db.Ping(); err != nil {
 		db.Close()
 		// fall back to in-memory so the app keeps working (history won't persist).
-		// Process-unique name avoids clashing with other in-process stores;
-		// cache=shared keeps the single connection pool able to see it.
-		db, err = sql.Open("sqlite", fmt.Sprintf("file:agent_mem_%d?mode=memory&cache=shared", os.Getpid()))
-		if err != nil {
-			return fmt.Errorf("agentstore: open in-memory fallback: %w", err)
+		if err := s.openInMemoryLocked(); err != nil {
+			return err
 		}
-		s.dbPath = ":memory:"
+	} else {
+		s.setDBLocked(db)
 	}
-	// modernc/sqlite is happiest with limited concurrency; Serialize wraps
-	// every conn in a mutex.
-	db.SetMaxOpenConns(1)
-	s.db = db
 	if err := s.migrateLocked(); err != nil {
 		return err
 	}
 	return s.importLegacyLocked(dir)
+}
+
+// openInMemory opens the store over a process-private memory database.
+func (s *Store) openInMemory() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.openInMemoryLocked()
+}
+
+func (s *Store) openInMemoryLocked() error {
+	// Process-unique name avoids clashing with other in-process stores;
+	// cache=shared keeps the single connection pool able to see it.
+	db, err := sql.Open("sqlite", fmt.Sprintf("file:agent_mem_%d?mode=memory&cache=shared", os.Getpid()))
+	if err != nil {
+		return fmt.Errorf("agentstore: open in-memory fallback: %w", err)
+	}
+	s.dbPath = ":memory:"
+	s.setDBLocked(db)
+	return nil
+}
+
+// setDBLocked assigns the db handle; modernc/sqlite is happiest with limited
+// concurrency, so the pool is capped at one Serialize-wrapped connection.
+// Callers must hold s.mu.
+func (s *Store) setDBLocked(db *sql.DB) {
+	db.SetMaxOpenConns(1)
+	s.db = db
 }
 
 const schema = `

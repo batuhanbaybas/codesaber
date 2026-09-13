@@ -153,14 +153,22 @@ func New(sink adapter.EventSink) *App {
 	return NewWith(sink, project.DefaultStorePath())
 }
 
+// chatStoreFactory opens the chat transcript store; tests swap it for a
+// temp-dir-backed (or in-memory) store.
+var chatStoreFactory = agentstore.OpenStore
+
 // NewWith is New with an injectable recents store path (for tests).
 func NewWith(sink adapter.EventSink, storePath string) *App {
-	// agentstore.OpenStore falls back to an in-memory db when the on-disk
-	// one can't be opened, so a failure here is rare; log-and-continue keeps
-	// the app usable either way.
-	chats, err := agentstore.OpenStore()
+	// The store itself already falls back to an in-memory db when the
+	// on-disk one can't be opened; if even opening THAT fails, boot with an
+	// in-memory store rather than a nil one (nil would panic on first use).
+	chats, err := chatStoreFactory()
 	if err != nil {
 		log.Printf("agentstore: open failed: %v (chat history will not persist)", err)
+		chats, err = agentstore.OpenStoreInMemory()
+		if err != nil {
+			panic(fmt.Sprintf("agentstore: in-memory fallback failed: %v", err))
+		}
 	}
 	a := &App{
 		sink:                 sink,
@@ -598,11 +606,11 @@ func (a *App) SearchText(
 		a.searchMu.Unlock()
 	}()
 	return search.Search(root, search.Query{
-		Term:         term,
-		Regex:        regex,
+		Term:          term,
+		Regex:         regex,
 		CaseSensitive: caseSensitive,
-		Include:      include,
-		Exclude:      exclude,
+		Include:       include,
+		Exclude:       exclude,
 	}, ctx)
 }
 

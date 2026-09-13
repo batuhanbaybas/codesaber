@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"codesaber/backend/agentstore"
 	"codesaber/backend/git"
 	"codesaber/backend/lsp"
 	"codesaber/backend/settings"
@@ -57,11 +58,20 @@ func (f *fakeSink) waitFor(t *testing.T, name string, timeout time.Duration) fak
 func newTestApp(t *testing.T) (*App, *fakeSink) {
 	t.Helper()
 	sink := &fakeSink{}
+	// Isolate the chat store: the real user DB must never be touched by
+	// tests, so every test app gets its own temp-dir store.
+	dir := t.TempDir()
+	prevFactory := chatStoreFactory
+	chatStoreFactory = func() (*agentstore.Store, error) {
+		return agentstore.OpenStoreAt(dir)
+	}
+	t.Cleanup(func() { chatStoreFactory = prevFactory })
 	app := NewWith(sink, filepath.Join(t.TempDir(), "recents.json"))
 	t.Cleanup(func() {
 		for _, p := range app.reg.List() {
 			app.CloseWatcher(p.ID)
 		}
+		app.chats.Close()
 	})
 	return app, sink
 }
