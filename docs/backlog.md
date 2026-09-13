@@ -74,9 +74,9 @@ Legend: ✅ done · 🚧 in progress · ⬜ todo · 📌 deferred (was requested
 - 📌 Pending from spec: light "Milk" theme, tree-sitter search/index, welcome-screen refinements, error surfacing for stale recents
 ## Phase 7 — Night build (2026-09-12, next-five recommendations)
 
-- 🚧 7.1 AI edit diff review: side-by-side accept/reject on agent fs-writes (diff preview inside permission card; reject = deny + keep buffer)
-- 🚧 7.2 ⌘T symbol search: web-tree-sitter (WASM) symbol index per project (go/ts/js grammars), quick-open integration ("sym:" prefix + ⌘T), index invalidated on save/fs change
-- 🚧 7.3 Search refinements: case-sensitive toggle, include/exclude globs
-- 🚧 7.4 Editor niceties: bracket pair colorization toggle, scrollPastEnd, breadcrumbs-under-tabs showing file path
-- 🚧 7.5 Perf HUD ⌘⇧H: live RSS, per-engine latency counters, terminal count, err counts
-- ⬜ Compare doc: vs Cursor / Trae / Zed — must-have gap list
+- ✅ 7.1 AI edit diff review: side-by-side accept/reject on agent fs-writes (diff preview inside permission card; reject = deny + keep buffer)
+- ✅ 7.2 ⌘T symbol search: web-tree-sitter (WASM) symbol index per project (go/ts/js grammars), quick-open integration ("sym:" prefix + ⌘T), index invalidated on save/fs change
+- ✅ 7.3 Search refinements: case-sensitive toggle, include/exclude globs
+- ✅ 7.4 Editor niceties: bracket pair colorization toggle, scrollPastEnd, breadcrumbs-under-tabs showing file path
+- ✅ 7.5 Perf HUD ⌘⇧H: live RSS, per-engine latency counters, terminal count, err counts
+- ✅ Compare doc: docs/ide-comparison-2026-09-12.md (vs Cursor/Trae/Zed, must-have gap list)
