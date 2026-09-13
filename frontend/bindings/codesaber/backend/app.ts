@@ -38,7 +38,9 @@ import * as settings$0 from "./settings/models.js";
 import * as $models from "./models.js";
 
 /**
- * ACPClearTranscript deletes every entry of the active/latest session.
+ * ACPClearTranscript deletes every entry of the active/latest session. Like
+ * ACPDeleteSession it refuses while a running harness is pointed at that
+ * session, since deleting the record would strand the harness's writes.
  */
 export function ACPClearTranscript(projectID: string): $CancellablePromise<void> {
     return $Call.ByID(2240702008, projectID);
@@ -46,7 +48,8 @@ export function ACPClearTranscript(projectID: string): $CancellablePromise<void>
 
 /**
  * ACPDeleteSession removes a persisted session. Refuses while a running
- * harness is writing to it.
+ * harness is writing to it; afterwards a dead stub's dangling chatID is
+ * cleared so the next spawn mints a fresh record.
  */
 export function ACPDeleteSession(projectID: string, sessionID: string): $CancellablePromise<void> {
     return $Call.ByID(3198438054, projectID, sessionID);
