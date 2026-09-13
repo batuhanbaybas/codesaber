@@ -82,8 +82,8 @@ Legend: ✅ done · 🚧 in progress · ⬜ todo · 📌 deferred (was requested
 - ✅ Compare doc: docs/ide-comparison-2026-09-12.md (vs Cursor/Trae/Zed, must-have gap list)
 
 ## Phase 8 — Feature batch (2026-09-13)
-- 🚧 8.1 Markdown preview toggle (top-right button on .md files), ⌘W closes tab (not window), project-section folder collapse
-- 🚧 8.2 Settings UI (gear rail icon opens dock tab; toggles + editor/terminal/search settings persisted)
-- 🚧 8.3 AI UX: prompt history (up/down recall), inline ⌘K edit-at-cursor via harness
-- 🚧 8.4 Hunk-level git staging (post-file row expansion; git apply --cached via binary when available)
+- ✅ 8.1 Markdown preview toggle (top-right button on .md files), ⌘W closes tab (not window), project-section folder collapse
+- ✅ 8.2 Settings UI (gear rail icon opens dock tab; toggles + editor/terminal/search settings persisted)
+- ✅ 8.3 AI UX: prompt history (up/down recall), inline ⌘K edit-at-cursor via harness
+- ✅ 8.4 Hunk-level git staging (post-file row expansion; git apply --cached via binary when available)
 - ⬜ Parked: light theme, SSH remote, DAP debug, more LSPs (see compare doc)
