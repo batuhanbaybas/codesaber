@@ -11,3 +11,6 @@ build/android/overlay.json
 build/android/gen/.superpowers/
 
 .superpowers/
+codesaber
+codesaber.dev.app
+frontend/tsconfig.tsbuildinfo
