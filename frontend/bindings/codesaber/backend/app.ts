@@ -132,6 +132,14 @@ export function CreateFolder(path: string): $CancellablePromise<void> {
 }
 
 /**
+ * DeletePath removes the file or directory tree at path. The project root
+ * itself is never deletable.
+ */
+export function DeletePath(path: string): $CancellablePromise<void> {
+    return $Call.ByID(415982615, path);
+}
+
+/**
  * EnsureWorkspaceWindow opens the workspace window if none exists (or shows
  * the existing one). Called by the frontend after opening a project.
  */
@@ -390,6 +398,14 @@ export function RecentProjects(): $CancellablePromise<project$0.Recent[] | null>
  */
 export function RemoveProject(id: string): $CancellablePromise<void> {
     return $Call.ByID(4208626588, id);
+}
+
+/**
+ * RevealInFinder shows path in the OS file manager (Finder on macOS),
+ * selecting it when possible.
+ */
+export function RevealInFinder(path: string): $CancellablePromise<void> {
+    return $Call.ByID(291909345, path);
 }
 
 /**

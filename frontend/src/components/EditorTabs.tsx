@@ -95,6 +95,7 @@ const EditorTabs: React.FC = () => {
         <div
           className="fixed z-50 min-w-[140px] rounded-md border border-[var(--bg-border)] bg-[var(--bg-panel)] shadow-lg py-1 text-[12px]"
           style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          onMouseDown={(e) => e.stopPropagation()}
         >
           <button
             className="w-full text-left px-3 py-1.5 text-primary hover:bg-[#3b3d42]"

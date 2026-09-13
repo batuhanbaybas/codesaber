@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -474,6 +476,47 @@ func (a *App) CreateFolder(path string) error {
 		return fmt.Errorf("create folder %s: %w", path, err)
 	}
 	return nil
+}
+
+// DeletePath removes the file or directory tree at path. The project root
+// itself is never deletable.
+func (a *App) DeletePath(path string) error {
+	if err := a.validateProjectPath(path); err != nil {
+		return err
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("resolve %s: %w", path, err)
+	}
+	for _, p := range a.reg.List() {
+		if root, rerr := filepath.Abs(p.Root); rerr == nil && abs == root {
+			return fmt.Errorf("cannot delete project root: %s", path)
+		}
+	}
+	if err := os.RemoveAll(path); err != nil {
+		return fmt.Errorf("delete %s: %w", path, err)
+	}
+	return nil
+}
+
+// RevealInFinder shows path in the OS file manager (Finder on macOS),
+// selecting it when possible.
+func (a *App) RevealInFinder(path string) error {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("resolve %s: %w", path, err)
+	}
+	if _, err := os.Stat(abs); err != nil {
+		return fmt.Errorf("stat %s: %w", abs, err)
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("open", "-R", abs).Start()
+	case "windows":
+		return exec.Command("explorer", "/select,", abs).Start()
+	default:
+		return exec.Command("xdg-open", filepath.Dir(abs)).Start()
+	}
 }
 
 // EnsureWorkspaceWindow opens the workspace window if none exists (or shows

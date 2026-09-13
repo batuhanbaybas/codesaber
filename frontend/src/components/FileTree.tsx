@@ -5,6 +5,7 @@ import type { Entry } from '../../bindings/codesaber/backend/models'
 import { useProjects } from '../state/projects'
 import { useTabs } from '../state/tabs'
 import FileIcon from './FileIcon'
+import ConfirmDialog from './ConfirmDialog'
 
 const MAX_CHILDREN = 200
 
@@ -20,6 +21,19 @@ interface Row {
 interface Creating {
   parent: string
   depth: number
+  folder?: boolean
+}
+
+interface CtxMenu {
+  x: number
+  y: number
+  path: string | null
+  dir: boolean
+}
+
+interface PendingDelete {
+  path: string
+  name: string
 }
 
 const parentOf = (p: string) => {
@@ -38,6 +52,8 @@ const FileTree: React.FC<{ root: string; projectId: string }> = ({
   const [extra, setExtra] = useState<Record<string, Entry[]>>({})
   const [creating, setCreating] = useState<Creating | null>(null)
   const [draft, setDraft] = useState('')
+  const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const mountedRef = useRef(true)
   const openDirsRef = useRef(openDirs)
@@ -176,7 +192,7 @@ const FileTree: React.FC<{ root: string; projectId: string }> = ({
 
   // startCreate opens the inline name input under parent's children. A dir
   // parent is expanded first so the input appears in a visible spot.
-  const startCreate = (parent: string) => {
+  const startCreate = (parent: string, folder = false) => {
     if (parent !== root && !openDirsRef.current.has(parent)) {
       setOpenDirs((prev) => new Set(prev).add(parent))
       App.ListTree(parent).then((es) => {
@@ -185,7 +201,7 @@ const FileTree: React.FC<{ root: string; projectId: string }> = ({
       })
     }
     setDraft('')
-    setCreating({ parent, depth: depthOf(parent) + 1 })
+    setCreating({ parent, depth: depthOf(parent) + 1, folder })
   }
 
   const cancelCreate = () => {
@@ -193,15 +209,17 @@ const FileTree: React.FC<{ root: string; projectId: string }> = ({
     setDraft('')
   }
 
-  // submitCreate: trailing "/" → folder, otherwise file (nested segments in
-  // the name create intermediate dirs on the backend). A created file is
-  // opened in a tab right away.
+  // submitCreate: explicit folder intent (context menu) or a trailing "/"
+  // makes a folder; otherwise a file (nested segments in the name create
+  // intermediate dirs on the backend). A created file is opened in a tab
+  // right away.
   const submitCreate = () => {
     if (!creating) return
     const raw = draft.trim()
+    const folderIntent = creating.folder === true
     cancelCreate()
     if (!raw) return
-    const isFolder = raw.endsWith('/')
+    const isFolder = folderIntent || raw.endsWith('/')
     const clean = isFolder ? raw.replace(/\/+$/, '') : raw
     if (!clean) return
     const path = creating.parent + '/' + clean
@@ -225,6 +243,54 @@ const FileTree: React.FC<{ root: string; projectId: string }> = ({
   useEffect(() => {
     if (creating) inputRef.current?.focus()
   }, [creating])
+
+  // Context menu dismisses on any click elsewhere or window blur.
+  useEffect(() => {
+    if (!ctxMenu) return
+    const dismiss = () => setCtxMenu(null)
+    window.addEventListener('mousedown', dismiss)
+    window.addEventListener('blur', dismiss)
+    return () => {
+      window.removeEventListener('mousedown', dismiss)
+      window.removeEventListener('blur', dismiss)
+    }
+  }, [ctxMenu])
+
+  const openCtxMenu = (e: React.MouseEvent, path: string | null, dir: boolean) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setCtxMenu({ x: e.clientX, y: e.clientY, path, dir })
+  }
+
+  const deleteRow = (path: string) => {
+    setPendingDelete({
+      path,
+      name: path.slice(path.lastIndexOf('/') + 1) || path,
+    })
+  }
+
+  const confirmDelete = () => {
+    const target = pendingDelete
+    setPendingDelete(null)
+    if (!target) return
+    App.DeletePath(target.path).catch((e) => {
+      window.dispatchEvent(
+        new CustomEvent('codesaber:status-hint', {
+          detail: String(e).slice(0, 120),
+        }),
+      )
+    })
+  }
+
+  const revealRow = (path: string) => {
+    App.RevealInFinder(path).catch((e) => {
+      window.dispatchEvent(
+        new CustomEvent('codesaber:status-hint', {
+          detail: String(e).slice(0, 120),
+        }),
+      )
+    })
+  }
 
   const onRowClick = (row: Row) => {
     if (row.more) return
@@ -252,11 +318,7 @@ const FileTree: React.FC<{ root: string; projectId: string }> = ({
       className="flex items-center gap-1 py-[3px] pr-2 hover:bg-[#373940] cursor-default"
       style={{ paddingLeft: 8 + row.depth * 12 }}
       onClick={() => onRowClick(row)}
-      onContextMenu={(e) => {
-        e.preventDefault()
-        e.stopPropagation()
-        startCreate(row.dir ? row.path : parentOf(row.path))
-      }}
+      onContextMenu={(e) => openCtxMenu(e, row.path, row.dir)}
     >
       <span className="w-2 text-dim text-[9px]">
         {row.dir ? (openDirs.has(row.path) ? '\u25be' : '\u25b8') : ''}
@@ -296,14 +358,75 @@ const FileTree: React.FC<{ root: string; projectId: string }> = ({
   return (
     <div
       className="py-1"
-      onContextMenu={(e) => {
-        e.preventDefault()
-        startCreate(root)
-      }}
+      onContextMenu={(e) => openCtxMenu(e, null, false)}
     >
       {rowEls}
       {visibleRows.length === 0 && !creating && (
         <div className="px-3 py-2 text-dim text-[10px]">Empty</div>
+      )}
+      {ctxMenu && (
+        <div
+          className="fixed z-50 min-w-[150px] rounded-md border border-[var(--bg-border)] bg-[var(--bg-panel)] shadow-lg py-1 text-[12px]"
+          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          // Mousedowns inside the menu must not reach the window-level
+          // dismiss listener (it would unmount the menu before the click
+          // lands). Actions run on click so the browser's mousedown default
+          // focus behavior can't steal focus from a freshly-mounted inline
+          // input.
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button
+            className="w-full text-left px-3 py-1.5 text-primary hover:bg-[#3b3d42]"
+            onClick={() => {
+              startCreate(ctxMenu.path ?? root, false)
+              setCtxMenu(null)
+            }}
+          >
+            New File
+          </button>
+          <button
+            className="w-full text-left px-3 py-1.5 text-primary hover:bg-[#3b3d42]"
+            onClick={() => {
+              startCreate(ctxMenu.path ?? root, true)
+              setCtxMenu(null)
+            }}
+          >
+            New Folder
+          </button>
+          {ctxMenu.path && (
+            <>
+              <div className="my-1 h-px bg-[var(--bg-border)]" />
+              <button
+                className="w-full text-left px-3 py-1.5 text-primary hover:bg-[#3b3d42]"
+                onClick={() => {
+                  revealRow(ctxMenu.path!)
+                  setCtxMenu(null)
+                }}
+              >
+                Show in Finder
+              </button>
+              <button
+                className="w-full text-left px-3 py-1.5 text-[#ff6b6b] hover:bg-[#3b3d42]"
+                onClick={() => {
+                  deleteRow(ctxMenu.path!)
+                  setCtxMenu(null)
+                }}
+              >
+                Delete
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {pendingDelete && (
+        <ConfirmDialog
+          title="Delete"
+          message={`Delete "${pendingDelete.name}"? This cannot be undone.`}
+          confirmLabel="Delete"
+          danger
+          onConfirm={confirmDelete}
+          onCancel={() => setPendingDelete(null)}
+        />
       )}
     </div>
   )
