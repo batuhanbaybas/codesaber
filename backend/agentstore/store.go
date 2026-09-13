@@ -114,12 +114,17 @@ func (s *Store) open() error {
 	return s.openAt(dir)
 }
 
-// openAt creates the dir, opens the db and imports legacy JSONL.
+// openAt creates the dir, opens the db and imports legacy JSONL. When the
+// on-disk location is unusable (mkdir fails, db won't open/ping), it falls
+// back to an in-memory db so the app keeps working (history won't persist).
 func (s *Store) openAt(dir string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("agentstore: mkdir %s: %w", dir, err)
+		if ferr := s.openInMemoryLocked(); ferr != nil {
+			return ferr
+		}
+		return s.migrateLocked()
 	}
 	s.dbPath = filepath.Join(dir, "agent.db")
 	db, err := sql.Open("sqlite", s.dbPath)
@@ -141,11 +146,15 @@ func (s *Store) openAt(dir string) error {
 	return s.importLegacyLocked(dir)
 }
 
-// openInMemory opens the store over a process-private memory database.
+// openInMemory opens the store over a process-private memory database and
+// applies the schema (the db starts empty; Append needs the tables).
 func (s *Store) openInMemory() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.openInMemoryLocked()
+	if err := s.openInMemoryLocked(); err != nil {
+		return err
+	}
+	return s.migrateLocked()
 }
 
 func (s *Store) openInMemoryLocked() error {
