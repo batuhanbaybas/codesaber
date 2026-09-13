@@ -173,6 +173,15 @@ func (s *Store) Append(sessionID, projectID string, e Entry) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.appendEntryLocked(sessionID, projectID, e)
+}
+
+// appendEntryLocked persists one entry. Callers must hold s.mu. For tool
+// entries with a ToolID it upserts by (session, tool_id); otherwise it
+// appends with the next seq. If the session row does not exist it is created
+// (projectID required then). The first user text entry auto-titles an
+// untitled session (first line, ≤60 chars).
+func (s *Store) appendEntryLocked(sessionID, projectID string, e Entry) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("agentstore: begin: %w", err)
@@ -326,6 +335,11 @@ func (s *Store) LatestSession(projectID string) (SessionMeta, error) {
 func (s *Store) RenameSession(sessionID, title string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.renameSessionLocked(sessionID, title)
+}
+
+// renameSessionLocked sets a session's title. Callers must hold s.mu.
+func (s *Store) renameSessionLocked(sessionID, title string) error {
 	title = strings.TrimSpace(title)
 	if title == "" {
 		return errors.New("agentstore: empty title")
@@ -387,14 +401,14 @@ func (s *Store) importLegacyLocked(dir string) error {
 		sid := projectID + "-legacy"
 		title := "Imported chat"
 		for _, e := range entries {
-			if err := s.Append(sid, projectID, e); err != nil {
+			if err := s.appendEntryLocked(sid, projectID, e); err != nil {
 				return fmt.Errorf("agentstore: import %s: %w", base, err)
 			}
 			if e.Kind == KindText && e.Role == "user" && title == "Imported chat" {
 				title = deriveTitle(e.Text)
 			}
 		}
-		_ = s.RenameSession(sid, title)
+		_ = s.renameSessionLocked(sid, title)
 		if err := os.Rename(p, p+".imported"); err != nil {
 			return fmt.Errorf("agentstore: rename imported file: %w", err)
 		}
