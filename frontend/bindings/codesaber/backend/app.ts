@@ -38,6 +38,21 @@ import * as settings$0 from "./settings/models.js";
 import * as $models from "./models.js";
 
 /**
+ * ACPClearTranscript deletes every entry of the active/latest session.
+ */
+export function ACPClearTranscript(projectID: string): $CancellablePromise<void> {
+    return $Call.ByID(2240702008, projectID);
+}
+
+/**
+ * ACPDeleteSession removes a persisted session. Refuses while a running
+ * harness is writing to it.
+ */
+export function ACPDeleteSession(projectID: string, sessionID: string): $CancellablePromise<void> {
+    return $Call.ByID(3198438054, projectID, sessionID);
+}
+
+/**
  * ACPHarnesses lists known agent profiles with PATH availability.
  */
 export function ACPHarnesses(): $CancellablePromise<acp$0.Info[] | null> {
@@ -45,8 +60,8 @@ export function ACPHarnesses(): $CancellablePromise<acp$0.Info[] | null> {
 }
 
 /**
- * ACPLoadTranscript returns the persisted chat entries for the project (used
- * by the Agent panel on mount).
+ * ACPLoadTranscript returns the persisted entries for the project's active
+ * (or latest) session.
  */
 export function ACPLoadTranscript(projectID: string): $CancellablePromise<agentstore$0.Entry[] | null> {
     return $Call.ByID(1274648703, projectID);
@@ -66,6 +81,22 @@ export function ACPNewSession(projectID: string): $CancellablePromise<void> {
 }
 
 /**
+ * ACPOpenSession switches the UI/harness context to a persisted session:
+ * with a running harness it re-points the transcript and re-emits it; without
+ * one it just emits the stored transcript (no auto-start).
+ */
+export function ACPOpenSession(projectID: string, sessionID: string): $CancellablePromise<void> {
+    return $Call.ByID(4234377075, projectID, sessionID);
+}
+
+/**
+ * ACPRenameSession sets a session's display title.
+ */
+export function ACPRenameSession(sessionID: string, title: string): $CancellablePromise<void> {
+    return $Call.ByID(4197558245, sessionID, title);
+}
+
+/**
  * ACPRespondPermission resolves a pending permission request: optionId picks
  * one of the offered options; cancel=true answers {"outcome":"cancelled"}.
  */
@@ -81,6 +112,13 @@ export function ACPRespondPermission(projectID: string, requestID: string, optio
  */
 export function ACPSendPrompt(projectID: string, text: string): $CancellablePromise<void> {
     return $Call.ByID(2328941885, projectID, text);
+}
+
+/**
+ * ACPSessions lists the project's persisted agent sessions (newest first).
+ */
+export function ACPSessions(projectID: string): $CancellablePromise<agentstore$0.SessionMeta[] | null> {
+    return $Call.ByID(157939588, projectID);
 }
 
 /**

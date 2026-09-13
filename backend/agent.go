@@ -113,6 +113,7 @@ type agentSession struct {
 	session  acpPrompter
 	harness  acp.Info
 	root     string
+	chatID   string // persisted session record the harness writes to
 	pending  map[string]chan acpPermissionChoice
 	nextID   int
 	starting bool // start in flight; guards double-spawn (double-click)
@@ -218,6 +219,35 @@ func (ag *agentSession) takeTurnText() string {
 	return s
 }
 
+// newChatSessionID mints a persisted-transcript session id.
+func newChatSessionID() string {
+	return fmt.Sprintf("ses-%d", time.Now().UnixNano())
+}
+
+// activeSessionID returns the persisted session record the project's harness
+// is currently writing to ("" when none).
+func (a *App) activeSessionID(projectID string) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	ag := a.agents[projectID]
+	if ag == nil {
+		return ""
+	}
+	return ag.chatID
+}
+
+// chatIDForEmit resolves the transcript id to show: the agent's active record
+// or, when no harness is running, the project's latest session.
+func (a *App) chatIDForEmit(projectID string) string {
+	if id := a.activeSessionID(projectID); id != "" {
+		return id
+	}
+	if meta, err := a.chats.LatestSession(projectID); err == nil {
+		return meta.ID
+	}
+	return ""
+}
+
 // ACPHarnesses lists known agent profiles with PATH availability.
 func (a *App) ACPHarnesses() []acp.Info {
 	return acp.DefaultProfiles()
@@ -248,7 +278,7 @@ func (a *App) acpStartProfile(projectID string, profile acp.Info) error {
 	if !claimed {
 		// already running or a start is in flight: idempotent, just re-show
 		// the transcript
-		a.emitTranscript(projectID)
+		a.emitTranscript(projectID, a.chatIDForEmit(projectID))
 		return nil
 	}
 	// clear the flag on every exit path; failed start leaves a dead stub the
@@ -270,8 +300,12 @@ func (a *App) ACPSendPrompt(projectID, text string) error {
 	if s == nil {
 		return errors.New("acp: agent session is down; start a harness first")
 	}
+	// persisted session id: spawn always mints before any append
+	ag.mu.Lock()
+	chatID := ag.chatID
+	ag.mu.Unlock()
 
-	if err := a.chats.Append(projectID, agentstore.Entry{Role: "user", Kind: agentstore.KindText, Text: text}); err != nil {
+	if err := a.chats.Append(chatID, projectID, agentstore.Entry{Role: "user", Kind: agentstore.KindText, Text: text}); err != nil {
 		return fmt.Errorf("acp: persist user entry: %w", err)
 	}
 	a.sink.Emit(EventACPMsg, map[string]any{"projectId": projectID, "role": "user", "text": text, "kind": "text"})
@@ -280,7 +314,7 @@ func (a *App) ACPSendPrompt(projectID, text string) error {
 	ag.resetTurn()
 	_, err := s.Prompt(context.Background(), text)
 	if reply := ag.takeTurnText(); reply != "" {
-		_ = a.chats.Append(projectID, agentstore.Entry{Role: "agent", Kind: agentstore.KindText, Text: reply})
+		_ = a.chats.Append(chatID, projectID, agentstore.Entry{Role: "agent", Kind: agentstore.KindText, Text: reply})
 	}
 	if err != nil {
 		// surface the failure in the chat; the conn is typically dead after
@@ -342,9 +376,14 @@ func (a *App) ACPNewSession(projectID string) error {
 	// old conn is closed while a.mu is held; the new session claims the stub
 	// directly (bypassing the starting-flag back-off, since we hold the slot)
 	_ = s.Close()
-	if err := a.chats.Append(projectID, agentstore.Entry{Role: "system", Kind: agentstore.KindText, Text: "— new session —"}); err != nil {
-		a.mu.Unlock()
-		return fmt.Errorf("acp: persist session divider: %w", err)
+	// divider note lands in the session it ends; the respawn below mints a
+	// fresh record
+	ag.mu.Lock()
+	oldChatID := ag.chatID
+	ag.chatID = ""
+	ag.mu.Unlock()
+	if oldChatID != "" {
+		_ = a.chats.Append(oldChatID, projectID, agentstore.Entry{Role: "system", Kind: agentstore.KindText, Text: "— session ended —"})
 	}
 	ag.mu.Lock()
 	ag.starting = true
@@ -412,7 +451,10 @@ func (a *App) acpSpawnOnAgent(projectID string, ag *agentSession, profile acp.In
 			toolID := "fsWrite:" + path
 			title := "diff applied ✓ — " + path
 			if ag.noteTool(toolID, title) {
-				_ = a.chats.Append(projectID, agentstore.Entry{
+				ag.mu.Lock()
+				chatID := ag.chatID
+				ag.mu.Unlock()
+				_ = a.chats.Append(chatID, projectID, agentstore.Entry{
 					Role: "agent", Kind: agentstore.KindTool, Text: title, ToolID: toolID,
 				})
 			}
@@ -433,7 +475,15 @@ func (a *App) acpSpawnOnAgent(projectID string, ag *agentSession, profile acp.In
 	}
 	s.SetOnUpdate(a.acpUpdateHandler(projectID, ag))
 	ag.setSession(s)
-	a.emitTranscript(projectID)
+	// persisted session record: fresh per harness session
+	ag.mu.Lock()
+	if ag.chatID == "" {
+		ag.chatID = newChatSessionID()
+	}
+	chatID := ag.chatID
+	ag.mu.Unlock()
+	_ = a.chats.Append(chatID, projectID, agentstore.Entry{Role: "system", Kind: agentstore.KindText, Text: "— session started —"})
+	a.emitTranscript(projectID, chatID)
 	a.emitState(projectID, AgentStateIdle)
 	return nil
 }
@@ -455,10 +505,78 @@ func (a *App) ACPStop(projectID string) error {
 	return nil
 }
 
-// ACPLoadTranscript returns the persisted chat entries for the project (used
-// by the Agent panel on mount).
+// ACPLoadTranscript returns the persisted entries for the project's active
+// (or latest) session.
 func (a *App) ACPLoadTranscript(projectID string) ([]agentstore.Entry, error) {
-	return a.chats.Read(projectID)
+	chatID := a.chatIDForEmit(projectID)
+	if chatID == "" {
+		return []agentstore.Entry{}, nil
+	}
+	return a.chats.Read(chatID)
+}
+
+// ACPSessions lists the project's persisted agent sessions (newest first).
+func (a *App) ACPSessions(projectID string) ([]agentstore.SessionMeta, error) {
+	return a.chats.ListSessions(projectID)
+}
+
+// ACPOpenSession switches the UI/harness context to a persisted session:
+// with a running harness it re-points the transcript and re-emits it; without
+// one it just emits the stored transcript (no auto-start).
+func (a *App) ACPOpenSession(projectID, sessionID string) error {
+	sessions, err := a.chats.ListSessions(projectID)
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, s := range sessions {
+		if s.ID == sessionID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("acp: no session %q for project", sessionID)
+	}
+	a.mu.Lock()
+	ag := a.agents[projectID]
+	if ag != nil {
+		ag.mu.Lock()
+		ag.chatID = sessionID
+		ag.mu.Unlock()
+	}
+	a.mu.Unlock()
+	a.emitTranscript(projectID, sessionID)
+	return nil
+}
+
+// ACPDeleteSession removes a persisted session. Refuses while a running
+// harness is writing to it.
+func (a *App) ACPDeleteSession(projectID, sessionID string) error {
+	if a.activeSessionID(projectID) == sessionID {
+		if ag := a.agentFor(projectID); ag != nil && ag.get() != nil {
+			return errors.New("acp: cannot delete the active session while the harness is running")
+		}
+	}
+	return a.chats.DeleteSession(sessionID)
+}
+
+// ACPRenameSession sets a session's display title.
+func (a *App) ACPRenameSession(sessionID, title string) error {
+	return a.chats.RenameSession(sessionID, title)
+}
+
+// ACPClearTranscript deletes every entry of the active/latest session.
+func (a *App) ACPClearTranscript(projectID string) error {
+	chatID := a.chatIDForEmit(projectID)
+	if chatID == "" {
+		return nil
+	}
+	if err := a.chats.DeleteSession(chatID); err != nil {
+		return err
+	}
+	a.emitTranscript(projectID, chatID)
+	return nil
 }
 
 func (a *App) agentFor(projectID string) *agentSession {
@@ -603,7 +721,10 @@ func (a *App) acpUpdateHandler(projectID string, ag *agentSession) func(acp.Sess
 				return
 			}
 			if ag.noteTool(id, title) {
-				_ = a.chats.Append(projectID, agentstore.Entry{
+				ag.mu.Lock()
+				chatID := ag.chatID
+				ag.mu.Unlock()
+				_ = a.chats.Append(chatID, projectID, agentstore.Entry{
 					Role: "agent", Kind: agentstore.KindTool, Text: title, ToolID: id,
 				})
 			}
@@ -615,12 +736,12 @@ func (a *App) acpUpdateHandler(projectID string, ag *agentSession) func(acp.Sess
 	}
 }
 
-func (a *App) emitTranscript(projectID string) {
-	entries, err := a.chats.Read(projectID)
+func (a *App) emitTranscript(projectID, chatID string) {
+	entries, err := a.chats.Read(chatID)
 	if err != nil {
 		entries = []agentstore.Entry{}
 	}
-	a.sink.Emit(EventACPTranscript, map[string]any{"projectId": projectID, "entries": entries})
+	a.sink.Emit(EventACPTranscript, map[string]any{"projectId": projectID, "sessionID": chatID, "entries": entries})
 }
 
 func (a *App) emitState(projectID, state string) {

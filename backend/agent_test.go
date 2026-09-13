@@ -237,11 +237,12 @@ func TestACPSendPromptStreamsAndPersists(t *testing.T) {
 	for _, e := range entries {
 		roles = append(roles, e.Role)
 	}
-	if len(roles) != 3 || roles[0] != "user" || roles[2] != "agent" {
-		t.Fatalf("transcript roles = %#v, want [user agent agent]", roles)
+	// session-started note + user entry + persisted tool call + agent reply
+	if len(roles) != 4 || roles[0] != "system" || roles[1] != "user" || roles[3] != "agent" {
+		t.Fatalf("transcript roles = %#v, want [system user agent agent]", roles)
 	}
-	if entries[2].Text != "hi there" {
-		t.Errorf("agent entry text = %q", entries[2].Text)
+	if entries[3].Text != "hi there" {
+		t.Errorf("agent entry text = %q", entries[3].Text)
 	}
 }
 
@@ -345,6 +346,7 @@ func TestACPNewSessionClosesOldAndKeepsTranscript(t *testing.T) {
 		t.Fatalf("ACPSendPrompt: %v", err)
 	}
 	_ = sink
+	oldID := app.activeSessionID(pid)
 
 	fp2 := &fakePrompter{}
 	installFakeAgent(t, fp2)
@@ -357,12 +359,21 @@ func TestACPNewSessionClosesOldAndKeepsTranscript(t *testing.T) {
 	if fp2.closed {
 		t.Error("new session should be running")
 	}
+	// the previous record is kept: its tail is the session-ended divider
+	oldEntries, err := app.chats.Read(oldID)
+	if err != nil {
+		t.Fatalf("read old session: %v", err)
+	}
+	if len(oldEntries) == 0 || oldEntries[len(oldEntries)-1].Text != "— session ended —" {
+		t.Fatalf("old session tail = %#v, want divider entry", oldEntries)
+	}
+	// the fresh record becomes the active transcript
 	entries, err := app.ACPLoadTranscript(pid)
 	if err != nil {
 		t.Fatalf("LoadTranscript: %v", err)
 	}
-	if len(entries) == 0 || entries[len(entries)-1].Text != "— new session —" {
-		t.Fatalf("transcript tail = %#v, want divider entry", entries)
+	if len(entries) != 1 || entries[0].Text != "— session started —" {
+		t.Fatalf("transcript tail = %#v, want session-started entry", entries)
 	}
 }
 
@@ -836,3 +847,130 @@ func TestACPTranscriptEntryJSONRoundtrip(t *testing.T) {
 
 // ensure os import used (keep imports honest if tests evolve)
 var _ = os.Getenv
+
+// TestACPSessionsCRUD verifies the session-record RPCs: a prompt turn creates
+// one titled record, rename retitles it, ACPNewSession adds a second record
+// and ACPDeleteSession removes a non-active one.
+func TestACPSessionsCRUD(t *testing.T) {
+	app, _, pid := newAgentTestApp(t)
+	installFakeAgent(t, &fakePrompter{})
+
+	if err := app.ACPStart(pid, "opencode"); err != nil {
+		t.Fatalf("ACPStart: %v", err)
+	}
+	if err := app.ACPSendPrompt(pid, "fix the login bug"); err != nil {
+		t.Fatalf("ACPSendPrompt: %v", err)
+	}
+	sessions, err := app.ACPSessions(pid)
+	if err != nil {
+		t.Fatalf("ACPSessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1", len(sessions))
+	}
+	if sessions[0].Title != "fix the login bug" {
+		t.Fatalf("title = %q", sessions[0].Title)
+	}
+	sid := sessions[0].ID
+
+	if err := app.ACPRenameSession(sid, "Login fix"); err != nil {
+		t.Fatalf("ACPRenameSession: %v", err)
+	}
+	sessions, _ = app.ACPSessions(pid)
+	if sessions[0].Title != "Login fix" {
+		t.Fatalf("title after rename = %q", sessions[0].Title)
+	}
+
+	// new session creates a second record
+	if err := app.ACPNewSession(pid); err != nil {
+		t.Fatalf("ACPNewSession: %v", err)
+	}
+	sessions, _ = app.ACPSessions(pid)
+	if len(sessions) != 2 {
+		t.Fatalf("sessions = %d, want 2", len(sessions))
+	}
+
+	// delete the non-active one
+	other := sessions[0].ID
+	if other == app.activeSessionID(pid) {
+		other = sessions[1].ID
+	}
+	if err := app.ACPDeleteSession(pid, other); err != nil {
+		t.Fatalf("ACPDeleteSession: %v", err)
+	}
+	sessions, _ = app.ACPSessions(pid)
+	if len(sessions) != 1 {
+		t.Fatalf("sessions after delete = %d", len(sessions))
+	}
+}
+
+// TestACPOpenSessionSwitchesTranscript verifies ACPOpenSession re-points the
+// active session record so ACPLoadTranscript returns the opened session's
+// entries.
+func TestACPOpenSessionSwitchesTranscript(t *testing.T) {
+	app, _, pid := newAgentTestApp(t)
+	installFakeAgent(t, &fakePrompter{})
+	if err := app.ACPStart(pid, "opencode"); err != nil {
+		t.Fatalf("ACPStart: %v", err)
+	}
+	if err := app.ACPSendPrompt(pid, "first session prompt"); err != nil {
+		t.Fatalf("prompt 1: %v", err)
+	}
+	if err := app.ACPNewSession(pid); err != nil {
+		t.Fatalf("ACPNewSession: %v", err)
+	}
+	if err := app.ACPSendPrompt(pid, "second session prompt"); err != nil {
+		t.Fatalf("prompt 2: %v", err)
+	}
+	sessions, _ := app.ACPSessions(pid)
+	var firstID string
+	for _, s := range sessions {
+		if s.Title == "first session prompt" {
+			firstID = s.ID
+		}
+	}
+	if firstID == "" {
+		t.Fatal("first session not found")
+	}
+	if err := app.ACPOpenSession(pid, firstID); err != nil {
+		t.Fatalf("ACPOpenSession: %v", err)
+	}
+	entries, err := app.ACPLoadTranscript(pid)
+	if err != nil {
+		t.Fatalf("LoadTranscript: %v", err)
+	}
+	found := false
+	for _, e := range entries {
+		if e.Text == "first session prompt" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("opened transcript lacks first-session prompt: %#v", entries)
+	}
+}
+
+// TestACPDeleteSessionRefusesActiveWhileRunning verifies deleting the active
+// session is refused while its harness runs and allowed after ACPStop.
+func TestACPDeleteSessionRefusesActiveWhileRunning(t *testing.T) {
+	app, _, pid := newAgentTestApp(t)
+	installFakeAgent(t, &fakePrompter{})
+	if err := app.ACPStart(pid, "opencode"); err != nil {
+		t.Fatalf("ACPStart: %v", err)
+	}
+	if err := app.ACPSendPrompt(pid, "active session"); err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+	sessions, _ := app.ACPSessions(pid)
+	sid := sessions[0].ID
+	if err := app.ACPDeleteSession(pid, sid); err == nil {
+		t.Fatal("want error deleting the active, running session")
+	}
+	// after stop it is allowed
+	if err := app.ACPStop(pid); err != nil {
+		t.Fatalf("ACPStop: %v", err)
+	}
+	if err := app.ACPDeleteSession(pid, sid); err != nil {
+		t.Fatalf("delete after stop: %v", err)
+	}
+}

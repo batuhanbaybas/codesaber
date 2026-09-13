@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -154,12 +155,19 @@ func New(sink adapter.EventSink) *App {
 
 // NewWith is New with an injectable recents store path (for tests).
 func NewWith(sink adapter.EventSink, storePath string) *App {
+	// agentstore.OpenStore falls back to an in-memory db when the on-disk
+	// one can't be opened, so a failure here is rare; log-and-continue keeps
+	// the app usable either way.
+	chats, err := agentstore.OpenStore()
+	if err != nil {
+		log.Printf("agentstore: open failed: %v (chat history will not persist)", err)
+	}
 	a := &App{
 		sink:                 sink,
 		reg:                  project.NewRegistry(func() {}),
 		store:                project.NewStore(storePath),
 		buf:                  editor.New(),
-		chats:                agentstore.NewStore(),
+		chats:                chats,
 		watchers:             map[string]*fswatch.Watcher{},
 		closed:               map[string]bool{},
 		agents:               map[string]*agentSession{},
