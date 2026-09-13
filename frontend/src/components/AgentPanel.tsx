@@ -214,6 +214,7 @@ const AgentPanel: React.FC = () => {
   const [draft, setDraft] = useState('')
   const [tab, setTab] = useState<'chat' | 'history'>('chat')
   const [confirmDelete, setConfirmDelete] = useState<SessionMeta | null>(null)
+  const [histErr, setHistErr] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement | null>(null)
   const taRef = useRef<HTMLTextAreaElement | null>(null)
   const histRef = useRef<Record<string, string[]>>({})
@@ -246,11 +247,16 @@ const AgentPanel: React.FC = () => {
       .catch(() => {})
   }, [activeId])
 
-  // History tab refreshes its session list on open
+  // History tab refreshes its session list on open; errors clear on tab switch
+  useEffect(() => {
+    if (activeId) setHistErr(null)
+  }, [tab, activeId])
   useEffect(() => {
     if (tab === 'history' && activeId) void listSessions(activeId)
   }, [tab, activeId, listSessions])
 
+  // ↑/↓ walk the per-project prompt history; only engages when composer empty
+  // or already showing a recalled entry, so in-flight typing is never clobbered
   const recall = (dir: -1 | 1): boolean => {
     if (!activeId) return false
     const list = histRef.current[activeId]
@@ -275,8 +281,8 @@ const AgentPanel: React.FC = () => {
   // stick-to-bottom unless the user scrolled up
   useEffect(() => {
     const el = listRef.current
-    if (el && stickRef.current) el.scrollTop = el.scrollHeight
-  }, [timeline.length, timeline])
+    if (el && stickRef.current)     el.scrollTop = el.scrollHeight
+  }, [timeline])
 
   const onScroll = () => {
     const el = listRef.current
@@ -366,10 +372,10 @@ const AgentPanel: React.FC = () => {
 
       {/* Row 2: small actions */}
       <div className="shrink-0 flex items-center gap-4 mb-2">
-        <button className={dimAction} disabled={!running || thinking} title="Start a fresh session" onClick={() => void newSession(activeId)}>
+        <button className={dimAction} disabled={!running || thinking} title="Start a fresh session" onClick={() => newSession(activeId).catch((e) => setHistErr(String(e)))}>
           <span>＋</span> New Session
         </button>
-        <button className={dimAction} disabled={timeline.length === 0} title="Delete the active session's transcript" onClick={() => void clearTranscript(activeId)}>
+        <button className={dimAction} disabled={timeline.length === 0} title="Delete the active session's transcript" onClick={() => clearTranscript(activeId).catch((e) => setHistErr(String(e)))}>
           ⧉ Clear transcript
         </button>
       </div>
@@ -426,14 +432,25 @@ const AgentPanel: React.FC = () => {
         </div>
       ) : (
         <div className="flex-1 min-h-0 overflow-y-auto">
+          {histErr && (
+            <div className="bg-[#5a1d1d] text-[#ff9999] border border-[#ff6b6b]/30 rounded-lg px-3 py-1 mb-2">
+              {histErr}
+            </div>
+          )}
           {projSessions.length === 0 && <div className="px-1 py-2 text-dim">No sessions yet</div>}
           {projSessions.map((s) => (
             <SessionRow
               key={s.id}
               s={s}
               active={s.id === activeSID}
-              onOpen={() => void openSession(activeId, s.id)}
-              onRename={(title) => void renameSession(s.id, title)}
+              onOpen={() => {
+                setHistErr(null)
+                openSession(activeId, s.id).catch((e) => setHistErr(String(e)))
+              }}
+              onRename={(title) => {
+                setHistErr(null)
+                renameSession(s.id, title).catch((e) => setHistErr(String(e)))
+              }}
               onDelete={() => setConfirmDelete(s)}
             />
           ))}
@@ -488,7 +505,12 @@ const AgentPanel: React.FC = () => {
           confirmLabel="Delete"
           danger
           onConfirm={() => {
-            if (activeId) void deleteSession(activeId, confirmDelete.id)
+            if (activeId) {
+              setHistErr(null)
+              deleteSession(activeId, confirmDelete.id).then((err) => {
+                if (err) setHistErr(err)
+              })
+            }
             setConfirmDelete(null)
           }}
           onCancel={() => setConfirmDelete(null)}
