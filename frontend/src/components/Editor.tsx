@@ -30,7 +30,12 @@ import { html } from '@codemirror/lang-html'
 import { json } from '@codemirror/lang-json'
 import { go } from '@codemirror/legacy-modes/mode/go'
 import { darkSyntax } from '../lib/syntaxTheme'
-import { bracketColorsEnabled, onSettingsChange } from '../lib/settings'
+import {
+  bracketColorsEnabled,
+  effectiveFontSize,
+  getSettings,
+  onSettingsChange,
+} from '../lib/settings'
 import { Events } from '@wailsio/runtime'
 import { useProjects } from '../state/projects'
 import { useTabs, type Tab } from '../state/tabs'
@@ -129,6 +134,30 @@ const theme = EditorView.theme(
 // colorization preference, so toggle updates reconfigure open views.
 const useBracketColors = (): boolean =>
   useSyncExternalStore(onSettingsChange, bracketColorsEnabled)
+
+// useMinimap / useFontSize track the settings-store minimap visibility and
+// editor font size so changes reconfigure open views live.
+const useMinimap = (): boolean =>
+  useSyncExternalStore(onSettingsChange, () => getSettings().minimap)
+
+const useFontSize = (): number =>
+  useSyncExternalStore(onSettingsChange, () => effectiveFontSize(getSettings()))
+
+// minimapExt is the always-shaped minimap facet; visibility is toggled by
+// wrapping it in a Compartment.
+const minimapExt = showMinimap.compute(['doc'], () => ({
+  create: (v: EditorView) => {
+    const dom = document.createElement('div')
+    return { dom }
+  },
+  displayText: 'characters',
+  showOverlay: 'always',
+}))
+
+// fontTheme overrides the base theme's 13px font size (applied after `theme`
+// in the extension list so the later style wins).
+const fontTheme = (px: number): Extension =>
+  EditorView.theme({ '&': { fontSize: `${px}px` } }, { dark: true })
 
 // Bracket pair colorization with zero extra dependencies: a ViewPlugin
 // scans the visible range (±200 lines) with a ()[]{} stack and marks each
@@ -458,6 +487,10 @@ const TabEditor: React.FC<{
   )
   const bracketOn = useBracketColors()
   const bracketCompartmentRef = useRef(new Compartment())
+  const minimapOn = useMinimap()
+  const minimapCompartmentRef = useRef(new Compartment())
+  const fontPx = useFontSize()
+  const fontCompartmentRef = useRef(new Compartment())
 
   useEffect(() => {
     if (!hostRef.current) return
@@ -478,16 +511,10 @@ const TabEditor: React.FC<{
           bracketTheme,
           basicSetup,
           theme,
+          fontCompartmentRef.current.of(fontTheme(fontPx)),
           darkSyntax,
           lspTheme,
-          showMinimap.compute(['doc'], () => ({
-            create: (v: EditorView) => {
-              const dom = document.createElement('div')
-              return { dom }
-            },
-            displayText: 'characters',
-            showOverlay: 'always',
-          })),
+          minimapCompartmentRef.current.of(minimapOn ? minimapExt : []),
           keymap.of([
             {
               key: 'Mod-s',
@@ -549,6 +576,22 @@ const TabEditor: React.FC<{
       ),
     })
   }, [bracketOn])
+
+  // toggle the minimap live via its compartment
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: minimapCompartmentRef.current.reconfigure(
+        minimapOn ? minimapExt : [],
+      ),
+    })
+  }, [minimapOn])
+
+  // apply editor font size changes live via its compartment
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: fontCompartmentRef.current.reconfigure(fontTheme(fontPx)),
+    })
+  }, [fontPx])
 
   // didOpen once per tab once content exists (gopls must see full text).
   useEffect(() => {

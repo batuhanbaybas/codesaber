@@ -7,7 +7,7 @@ import React, {
 } from 'react'
 import { useProjects } from '../state/projects'
 import { APP_VERSION } from '../version'
-import { bracketColorsEnabled, toggleBracketColors, perfHudEnabled, togglePerfHud } from '../lib/settings'
+import { useSettings } from '../lib/settings'
 
 interface Command {
   id: string
@@ -31,6 +31,7 @@ const subsequence = (query: string, name: string): boolean => {
 
 const CommandPalette: React.FC = () => {
   const { projects, activeId, open, remove } = useProjects()
+  const { settings, update } = useSettings()
   const [openState, setOpenState] = useState(false)
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(0)
@@ -96,15 +97,15 @@ const CommandPalette: React.FC = () => {
     }
     cmds.push({
       id: 'toggle-bracket-colors',
-      name: `${bracketColorsEnabled() ? '\u2611' : '\u2610'} Toggle Bracket Colorization`,
-      hint: `Bracket pair colors: ${bracketColorsEnabled() ? 'on' : 'off'} (persisted)`,
-      run: () => toggleBracketColors(),
+      name: `${settings.bracketColors ? '\u2611' : '\u2610'} Toggle Bracket Colorization`,
+      hint: `Bracket pair colors: ${settings.bracketColors ? 'on' : 'off'} (persisted)`,
+      run: () => update({ bracketColors: !settings.bracketColors }),
     })
     cmds.push({
       id: 'toggle-perf-hud',
-      name: `${perfHudEnabled() ? '☑' : '☐'} Toggle Perf HUD`,
+      name: `${settings.perfHud ? '☑' : '☐'} Toggle Perf HUD`,
       hint: 'Live IDE health overlay (⌘⇧H, persisted)',
-      run: () => togglePerfHud(),
+      run: () => update({ perfHud: !settings.perfHud }),
     })
     cmds.push({
       id: 'about',
@@ -113,7 +114,7 @@ const CommandPalette: React.FC = () => {
       run: () => close(),
     })
     return cmds
-  }, [active, confirmingId, open, remove, close])
+  }, [active, confirmingId, open, remove, close, settings, update])
 
   const filtered = useMemo(
     () => commands.filter((c) => subsequence(query, c.name)),

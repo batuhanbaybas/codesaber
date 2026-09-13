@@ -28,6 +28,7 @@ import { TerminalProvider, useTerminal } from '../state/terminal'
 import GitPanel from '../components/GitPanel'
 import SearchPanel from '../components/SearchPanel'
 import TerminalPanel from '../components/TerminalPanel'
+import SettingsPanel from '../components/SettingsPanel'
 
 declare global {
   interface Window {
@@ -189,7 +190,7 @@ const GridIcon: Icon = (props) => (
 
 const ActivityRail: React.FC<{
   ui: LayoutUI
-  dockTab: 'search' | 'agent' | 'git'
+  dockTab: 'search' | 'agent' | 'git' | 'settings'
   onToggle: (key: 'sidebar' | 'rightDock' | 'terminal') => void
 }> = ({ ui, dockTab, onToggle }) => {
   const { activeId } = useProjects()
@@ -201,7 +202,7 @@ const ActivityRail: React.FC<{
       (st.untracked?.length ?? 0)
     : 0
 
-  const openDockTab = (tab: 'search' | 'git') => {
+  const openDockTab = (tab: 'search' | 'git' | 'settings') => {
     window.dispatchEvent(
       new CustomEvent('aide:set-dock-tab', { detail: { tab } }),
     )
@@ -215,7 +216,7 @@ const ActivityRail: React.FC<{
       aria-label={label}
       disabled
     >
-      {label === 'Settings — coming soon' ? <GearIcon /> : <GridIcon />}
+      <GridIcon />
     </button>
   )
 
@@ -259,7 +260,14 @@ const ActivityRail: React.FC<{
         <TerminalIcon />
       </button>
       <div className="mt-auto flex flex-col items-center gap-1.5">
-        {disabled('Settings — coming soon')}
+        <button
+          className={railBtn(ui.rightDock && dockTab === 'settings')}
+          title="Settings"
+          aria-label="Open settings dock"
+          onClick={() => openDockTab('settings')}
+        >
+          <GearIcon />
+        </button>
         {disabled('Extensions — coming soon')}
       </div>
     </div>
@@ -268,7 +276,9 @@ const ActivityRail: React.FC<{
 
 const WorkspaceInner: React.FC = () => {
   const { ui, toggle, setSize } = useLayout()
-  const [dockTab, setDockTab] = useState<'search' | 'agent' | 'git'>('git')
+  const [dockTab, setDockTab] = useState<
+    'search' | 'agent' | 'git' | 'settings'
+  >('git')
   const { activeId } = useProjects()
   const { tabsByProject, close } = useTabs()
   const { status } = useGit()
@@ -285,7 +295,13 @@ const WorkspaceInner: React.FC = () => {
   useEffect(() => {
     const onTab = (e: Event) => {
       const tab = (e as CustomEvent<{ tab?: string }>).detail?.tab
-      if (tab === 'search' || tab === 'agent' || tab === 'git') setDockTab(tab)
+      if (
+        tab === 'search' ||
+        tab === 'agent' ||
+        tab === 'git' ||
+        tab === 'settings'
+      )
+        setDockTab(tab)
     }
     window.addEventListener('aide:set-dock-tab', onTab)
     return () => window.removeEventListener('aide:set-dock-tab', onTab)
@@ -458,6 +474,18 @@ const WorkspaceInner: React.FC = () => {
               )}
             </button>
             <button
+              className={
+                'relative flex items-center gap-1.5 px-3 py-2 ' +
+                (dockTab === 'settings'
+                  ? 'text-primary after:absolute after:left-2 after:right-2 after:bottom-0 after:h-[2px] after:bg-[var(--accent)] after:rounded-t'
+                  : 'text-dim hover:text-primary')
+              }
+              onClick={() => setDockTab('settings')}
+            >
+              <GearIcon />
+              Settings
+            </button>
+            <button
               onClick={() => toggle('rightDock')}
               className="no-drag ml-auto mr-1 w-5 h-5 rounded flex items-center justify-center text-dim hover:text-primary hover:bg-[#373940]"
               title="Collapse dock (⌘D)"
@@ -471,6 +499,8 @@ const WorkspaceInner: React.FC = () => {
               <SearchPanel />
             ) : dockTab === 'agent' ? (
               <AgentPanel />
+            ) : dockTab === 'settings' ? (
+              <SettingsPanel />
             ) : (
               <GitPanel />
             )}

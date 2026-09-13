@@ -8,6 +8,7 @@ import React, {
 } from 'react'
 import { Events } from '@wailsio/runtime'
 import * as App from '../../bindings/aide/backend/app'
+import { getSettings } from '../lib/settings'
 import { useProjects } from './projects'
 
 export interface TerminalTab {
@@ -68,7 +69,11 @@ export const TerminalProvider: React.FC<{ children: React.ReactNode }> = ({
     const n = ++seqRef.current
     const suffix = `${n}-${crypto.randomUUID()}`
     try {
-      const termId = await App.TermStart(projectId, '', suffix)
+      const termId = await App.TermStart(
+        projectId,
+        getSettings().terminalShell,
+        suffix,
+      )
       setTerminalsByProject((prev) => {
         const st = prev[projectId] ?? { open: [], active: null }
         if (st.open.some((t) => t.termId === termId)) return prev
