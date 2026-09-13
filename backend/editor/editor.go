@@ -21,6 +21,13 @@ func (s *Service) Track(path, savedContent string) {
 	s.saved[path] = savedContent
 }
 
+// Count returns the number of tracked buffer paths.
+func (s *Service) Count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.saved)
+}
+
 func (s *Service) Dirty(path, current string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()

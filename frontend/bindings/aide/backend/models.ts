@@ -19,3 +19,16 @@ export interface GitSyncInfo {
     "ahead": number;
     "behind": number;
 }
+
+/**
+ * Health is a live snapshot of IDE backend health for the Perf HUD overlay.
+ */
+export interface Health {
+    "rssMB": number;
+    "goroutines": number;
+    "terminals": number;
+    "watchers": number;
+    "acpSessions": number;
+    "editorBuffers": number;
+    "worktreesSize": string;
+}

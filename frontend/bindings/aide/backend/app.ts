@@ -222,6 +222,15 @@ export function GitUnstage(projectID: string, paths: string[] | null): $Cancella
 }
 
 /**
+ * HealthMetrics computes cheap per-call counters at the 1Hz poll rate the
+ * Perf HUD uses. RSS via go-osstat/memory (pure Go, no cgo); on failure the
+ * field simply stays 0 rather than blocking the rest of the snapshot.
+ */
+export function HealthMetrics(): $CancellablePromise<$models.Health> {
+    return $Call.ByID(642384959);
+}
+
+/**
  * IndexFiles returns all file paths under root (absolute), walking the full
  * tree recursively. Skips .git, node_modules, dist, build, vendor, target and
  * .next directories, plus all other dotfiles; capped at maxIndexFiles.

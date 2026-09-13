@@ -7,7 +7,7 @@ import React, {
 } from 'react'
 import { useProjects } from '../state/projects'
 import { APP_VERSION } from '../version'
-import { bracketColorsEnabled, toggleBracketColors } from '../lib/settings'
+import { bracketColorsEnabled, toggleBracketColors, perfHudEnabled, togglePerfHud } from '../lib/settings'
 
 interface Command {
   id: string
@@ -99,6 +99,12 @@ const CommandPalette: React.FC = () => {
       name: `${bracketColorsEnabled() ? '\u2611' : '\u2610'} Toggle Bracket Colorization`,
       hint: `Bracket pair colors: ${bracketColorsEnabled() ? 'on' : 'off'} (persisted)`,
       run: () => toggleBracketColors(),
+    })
+    cmds.push({
+      id: 'toggle-perf-hud',
+      name: `${perfHudEnabled() ? '☑' : '☐'} Toggle Perf HUD`,
+      hint: 'Live IDE health overlay (⌘⇧H, persisted)',
+      run: () => togglePerfHud(),
     })
     cmds.push({
       id: 'about',

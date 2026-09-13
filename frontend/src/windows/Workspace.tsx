@@ -9,6 +9,8 @@ import QuickOpen from '../components/QuickOpen'
 import StatusBar from '../components/StatusBar'
 import ResizeHandle from '../components/ResizeHandle'
 import AgentPanel from '../components/AgentPanel'
+import PerfHUD from '../components/PerfHUD'
+import { togglePerfHud } from '../lib/settings'
 import { ProjectsProvider, useProjects } from '../state/projects'
 import { TabsProvider } from '../state/tabs'
 import { SymbolsProvider } from '../state/symbols'
@@ -286,6 +288,9 @@ const WorkspaceInner: React.FC = () => {
               }),
             )
             window.dispatchEvent(new Event('aide:search-focus'))
+          } else if (k === 'h') {
+            e.preventDefault()
+            togglePerfHud()
           }
           return
         }
@@ -413,6 +418,7 @@ const WorkspaceInner: React.FC = () => {
       <StatusBar />
       <CommandPalette />
       <QuickOpen />
+      <PerfHUD />
       {/* Bottom strip: terminal */}
       {ui.terminal && (
         <>

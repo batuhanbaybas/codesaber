@@ -8,5 +8,6 @@ export {
 
 export type {
     Entry,
-    GitSyncInfo
+    GitSyncInfo,
+    Health
 } from "./models.js";
