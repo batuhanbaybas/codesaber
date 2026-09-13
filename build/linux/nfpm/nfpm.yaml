@@ -6,7 +6,7 @@
 name: "codesaber"
 arch: ${GOARCH}
 platform: "linux"
-version: "0.1.0"
+version: ${GIT_TAG}
 section: "default"
 priority: "extra"
 maintainer: "mstrYoda <mstrYoda@users.noreply.github.com>"
