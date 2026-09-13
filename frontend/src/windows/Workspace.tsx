@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import Titlebar from '../components/Titlebar'
 import Sidebar from '../components/Sidebar'
 import EditorTabs from '../components/EditorTabs'
+import Breadcrumbs from '../components/Breadcrumbs'
 import Editor from '../components/Editor'
 import CommandPalette from '../components/CommandPalette'
 import QuickOpen from '../components/QuickOpen'
@@ -324,6 +325,7 @@ const WorkspaceInner: React.FC = () => {
         {/* Center editor area */}
         <div className="flex flex-col flex-1 min-w-0 bg-editor">
           <EditorTabs />
+          <Breadcrumbs />
           <Editor />
         </div>
         {/* Resize handle between editor area and right dock */}
