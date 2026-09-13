@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
+import { Events } from '@wailsio/runtime'
 import Titlebar from '../components/Titlebar'
 import Sidebar from '../components/Sidebar'
 import EditorTabs from '../components/EditorTabs'
@@ -12,7 +13,7 @@ import AgentPanel from '../components/AgentPanel'
 import PerfHUD from '../components/PerfHUD'
 import { togglePerfHud } from '../lib/settings'
 import { ProjectsProvider, useProjects } from '../state/projects'
-import { TabsProvider } from '../state/tabs'
+import { TabsProvider, useTabs } from '../state/tabs'
 import { SymbolsProvider } from '../state/symbols'
 import { GitProvider, useGit } from '../state/git'
 import { DiagCounterProvider } from '../state/diagstore'
@@ -27,6 +28,26 @@ import { TerminalProvider, useTerminal } from '../state/terminal'
 import GitPanel from '../components/GitPanel'
 import SearchPanel from '../components/SearchPanel'
 import TerminalPanel from '../components/TerminalPanel'
+
+declare global {
+  interface Window {
+    __aideWAt?: number
+  }
+}
+
+// requestCloseActive closes the active tab of the active project, but
+// debounces requests within 200ms of each other. Both ⌘W paths (webview
+// keydown and the native File → Close Tab menu accelerator) funnel through
+// here, so whichever fires — sometimes both, if macOS hands the chord to the
+// webview *and* triggers the menu — only one tab is closed per press.
+let lastCloseActiveAt = 0
+const CLOSE_DEBOUNCE_MS = 200
+const requestCloseActive = (close: () => void) => {
+  const now = Date.now()
+  if (now - lastCloseActiveAt < CLOSE_DEBOUNCE_MS) return
+  lastCloseActiveAt = now
+  close()
+}
 
 const TerminalStrip: React.FC = () => {
   const { activeId } = useProjects()
@@ -249,6 +270,7 @@ const WorkspaceInner: React.FC = () => {
   const { ui, toggle, setSize } = useLayout()
   const [dockTab, setDockTab] = useState<'search' | 'agent' | 'git'>('git')
   const { activeId } = useProjects()
+  const { tabsByProject, close } = useTabs()
   const { status } = useGit()
   const st = activeId ? status[activeId] : undefined
   const changed = st
@@ -267,6 +289,46 @@ const WorkspaceInner: React.FC = () => {
     }
     window.addEventListener('aide:set-dock-tab', onTab)
     return () => window.removeEventListener('aide:set-dock-tab', onTab)
+  }, [])
+
+  // ⌘W → close active tab, not window. Two cooperating paths:
+  //  1. Webview keydown (below, capture phase): preventDefault + immediately
+  //     close AND stamp window.__aideWAt.
+  //  2. Native File → Close Tab menu accelerator (main.go) emits
+  //     'aide:close-tab'. If the menu interceptor wins (its keyEquivalent is
+  //     matched before the webview on some macOS paths), marker stays stale
+  //     and this event closes the tab. If the webview already closed, the
+  //     event is skipped via the marker.
+  // Either way requestCloseActive's 200ms debounce guarantees exactly one
+  // close per key press. On the webview side, preventDefault is harmless
+  // ( WKWebView does not reserve ⌘W, but no default close action exists in the
+  // page ). A close request with no open tab is a no-op.
+  const closeActiveRef = useRef(() => {})
+  closeActiveRef.current = () => {
+    const st = activeId ? tabsByProject[activeId] : undefined
+    if (activeId && st?.active) close(activeId, st.active)
+  }
+  useEffect(() => {
+    const closeActive = () => closeActiveRef.current()
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.metaKey && !e.ctrlKey) return
+      if (e.shiftKey || e.altKey) return
+      if (e.key.toLowerCase() !== 'w') return
+      e.preventDefault()
+      e.stopPropagation()
+      window.__aideWAt = Date.now()
+      requestCloseActive(closeActive)
+    }
+    const off = Events.On('aide:close-tab', () => {
+      // marker fresh → webview path already (or is about to) close
+      if (Date.now() - (window.__aideWAt ?? 0) < 100) return
+      requestCloseActive(closeActive)
+    })
+    window.addEventListener('keydown', onKey, true)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      off()
+    }
   }, [])
 
   // Window-level panel keybindings. Mod-P/Mod-Shift-P are owned by

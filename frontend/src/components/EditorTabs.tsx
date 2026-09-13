@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { useProjects } from '../state/projects'
 import { useTabs } from '../state/tabs'
 import FileIcon from './FileIcon'
@@ -9,6 +9,22 @@ const EditorTabs: React.FC = () => {
   const state = activeId ? tabsByProject[activeId] : undefined
   const tabs = state?.open ?? []
   const active = state?.active ?? null
+  const [ctxMenu, setCtxMenu] = useState<{
+    x: number
+    y: number
+    path: string
+  } | null>(null)
+
+  useEffect(() => {
+    if (!ctxMenu) return
+    const dismiss = () => setCtxMenu(null)
+    window.addEventListener('mousedown', dismiss)
+    window.addEventListener('blur', dismiss)
+    return () => {
+      window.removeEventListener('mousedown', dismiss)
+      window.removeEventListener('blur', dismiss)
+    }
+  }, [ctxMenu])
 
   return (
     <div className="flex items-stretch bg-panel text-xs h-[34px] shrink-0 overflow-x-auto">
@@ -22,6 +38,12 @@ const EditorTabs: React.FC = () => {
               : 'text-dim hover:text-primary hover:bg-white/4')
           }
           onClick={() => activeId && setActive(activeId, tab.path)}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            if (activeId) setActive(activeId, tab.path)
+            setCtxMenu({ x: e.clientX, y: e.clientY, path: tab.path })
+          }}
         >
           {tab.path === active && (
             <span className="absolute top-0 left-0 right-0 h-[2px] bg-[var(--accent)]" />
@@ -59,6 +81,22 @@ const EditorTabs: React.FC = () => {
         {'\uFF0B'}
       </button>
       <div className="flex-1" />
+      {ctxMenu && (
+        <div
+          className="fixed z-50 min-w-[140px] rounded-md border border-[var(--bg-border)] bg-[var(--bg-panel)] shadow-lg py-1 text-[12px]"
+          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+        >
+          <button
+            className="w-full text-left px-3 py-1.5 text-primary hover:bg-[#3b3d42]"
+            onClick={() => {
+              if (activeId) close(activeId, ctxMenu.path)
+              setCtxMenu(null)
+            }}
+          >
+            Close Tab
+          </button>
+        </div>
+      )}
     </div>
   )
 }

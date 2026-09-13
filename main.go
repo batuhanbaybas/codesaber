@@ -20,6 +20,29 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+// setApplicationMenu installs the macOS application menu with the default
+// app/edit/window roles plus File → Close Tab (⌘W), which forwards to the
+// frontend as the 'aide:close-tab' event.
+func setApplicationMenu(app *application.App) {
+	menu := application.NewMenu()
+	menu.AddRole(application.AppMenu)
+
+	fileMenu := menu.AddSubmenu("File")
+	closeTab := fileMenu.Add("Close Tab")
+	closeTab.SetAccelerator("CmdOrCtrl+W")
+	closeTab.OnClick(func(*application.Context) {
+		app.Event.Emit("aide:close-tab")
+	})
+	// NOTE: no CloseWindow role here — the native performClose: item would
+	// also claim ⌘W and race with Close Tab. The window itself stays closable
+	// via the traffic lights / ⌘⇧W.
+
+	menu.AddRole(application.EditMenu)
+	menu.AddRole(application.WindowMenu)
+	app.Menu.Set(menu)
+}
+
+
 func init() {
 	// Register a custom event whose associated data type is string.
 	// This is not required, but the binding generator will pick up registered events
@@ -51,6 +74,14 @@ func main() {
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
 	})
+
+	// setApplicationMenu builds the macOS app menu. File → Close Tab is bound
+	// to ⌘W: a native menu accelerator intercepts the chord before the
+	// WKWebView sees it, so webview-level preventDefault alone cannot be
+	// relied on to keep Cmd+W from reaching system handlers. The menu item
+	// simply emits 'aide:close-tab'; the frontend decides whether the webview
+	// handler or this fallback actually closes the tab (see Workspace.tsx).
+	setApplicationMenu(app)
 
 	// Startup shows the welcome window only; the workspace window is created
 	// on demand from the backend RPC EnsureWorkspaceWindow (adapter/window.go).
