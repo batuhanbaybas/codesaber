@@ -53,6 +53,7 @@ export interface TranscriptEntry {
   role: string
   text: string
   kind: string
+  status?: string
   toolId?: string
   when?: string
 }
@@ -77,6 +78,9 @@ export const reduceMsg = (
   if (!ev.text) return s
   const timeline = s.timeline.slice()
   if (ev.kind === 'chunk') {
+    // Tool cards interrupt bubble merge by design: a chunk arriving when the
+    // tail is a tool card starts a NEW message instead of merging with the
+    // pre-tool chunk bubble.
     const tail = timeline[timeline.length - 1]
     if (tail && tail.type === 'message' && tail.role === 'agent' && tail.kind === 'chunk') {
       timeline[timeline.length - 1] = { ...tail, text: tail.text + ev.text }
@@ -136,15 +140,13 @@ export const removePermission = (s: AgentProjectState, requestId: string): Agent
   timeline: s.timeline.filter((i) => !(i.type === 'permission' && i.requestId === requestId)),
 })
 
-// reduceStateFlip applies an acp.state change; a flip to thinking drops
-// pending permission cards (the backend answers them server-side).
+// reduceStateFlip applies an acp.state change; ANY flip drops pending
+// permission cards (the backend answers them server-side, so a stale card
+// lingers otherwise and clicking it errors once the request is gone).
 export const reduceStateFlip = (s: AgentProjectState, st: AgentState): AgentProjectState => ({
   ...s,
   status: st,
-  timeline:
-    st === 'thinking'
-      ? s.timeline.filter((i) => i.type !== 'permission')
-      : s.timeline,
+  timeline: s.timeline.filter((i) => i.type !== 'permission'),
 })
 
 // reduceTranscript rebuilds the whole timeline from persisted entries.
@@ -160,7 +162,7 @@ export const reduceTranscript = (
         toolCallId: e.toolId,
         title: e.text,
         kind: 'other',
-        status: 'completed',
+        status: e.status ?? 'completed',
         content: '',
       })
       continue

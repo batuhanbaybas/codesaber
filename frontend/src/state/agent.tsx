@@ -21,6 +21,7 @@ import {
   type AgentProjectState,
   type AgentState,
   type PermissionOption,
+  type TranscriptEntry,
 } from './agentTimeline'
 
 export type { AgentState } from './agentTimeline'
@@ -94,13 +95,25 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({
 
   useEffect(() => {
     const onMsg = Events.On('acp.msg', (ev: any) => {
-      const { projectId, role, text, kind } = ev.data ?? {}
+      const { projectId, role, text, kind } = (ev.data ?? {}) as {
+        projectId?: string
+        role?: string
+        text?: string
+        kind?: string
+      }
       if (!projectId || !text) return
       patch(projectId, (s) => reduceMsg(s, { role, text, kind }))
     })
     const onTool = Events.On('acp.tool', (ev: any) => {
       const { projectId, toolCallId, title, kind, status, content } =
-        ev.data ?? {}
+        (ev.data ?? {}) as {
+          projectId?: string
+          toolCallId?: string
+          title?: string
+          kind?: string
+          status?: string
+          content?: string
+        }
       if (!projectId || !toolCallId) return
       patch(projectId, (s) =>
         reduceTool(s, { toolCallId, title, kind, status, content }),
@@ -117,7 +130,17 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({
         newText,
         isNew,
         truncated,
-      } = ev.data ?? {}
+      } = (ev.data ?? {}) as {
+        projectId?: string
+        requestId?: string
+        options?: unknown
+        purpose?: string
+        path?: string
+        oldText?: string
+        newText?: string
+        isNew?: boolean
+        truncated?: boolean
+      }
       if (!projectId || !requestId) return
       const opts = (Array.isArray(options) ? options : [])
         .map(asPermissionOption)
@@ -137,12 +160,19 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({
       )
     })
     const onState = Events.On('acp.state', (ev: any) => {
-      const { projectId, state: st } = ev.data ?? {}
+      const { projectId, state: st } = (ev.data ?? {}) as {
+        projectId?: string
+        state?: AgentState
+      }
       if (!projectId || !st) return
       patch(projectId, (s) => reduceStateFlip(s, st))
     })
     const onTranscript = Events.On('acp.transcript', (ev: any) => {
-      const { projectId, sessionID, entries } = ev.data ?? {}
+      const { projectId, sessionID, entries } = (ev.data ?? {}) as {
+        projectId?: string
+        sessionID?: string
+        entries?: TranscriptEntry[]
+      }
       if (!projectId) return
       patch(projectId, (s) =>
         reduceTranscript({ ...s, sessionId: sessionID ?? s.sessionId }, entries ?? []),
@@ -151,7 +181,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({
       void refreshSessions(projectId)
     })
     const onRemoved = Events.On('project.removed', (ev: any) => {
-      const { id } = ev.data ?? {}
+      const { id } = (ev.data ?? {}) as { id?: string }
       if (!id) return
       setState((prev) => {
         const next = { ...prev }
