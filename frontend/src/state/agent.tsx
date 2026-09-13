@@ -8,269 +8,162 @@ import React, {
 import { Events } from '@wailsio/runtime'
 import * as App from '../../bindings/codesaber/backend/app'
 import type { Info as HarnessInfo } from '../../bindings/codesaber/backend/acp/models'
-import type { Entry } from '../../bindings/codesaber/backend/agentstore/models'
+import type { SessionMeta } from '../../bindings/codesaber/backend/agentstore/models'
 import { useProjects } from './projects'
+import {
+  emptyAgentState,
+  reduceMsg,
+  reduceTool,
+  reducePermission,
+  removePermission,
+  reduceStateFlip,
+  reduceTranscript,
+  type AgentProjectState,
+  type AgentState,
+  type PermissionOption,
+} from './agentTimeline'
 
-export type AgentState = 'idle' | 'thinking' | 'harness-down' | 'no-harness'
-
-export interface ChatMessage {
-  id: string
-  role: 'user' | 'agent' | 'system'
-  text: string
-  kind: 'text' | 'chunk' | 'error'
-}
-
-export interface ToolCard {
-  toolCallId: string
-  title: string
-  kind: string
-  status: string
-  content: string
-}
-
-export interface PendingPermission {
-  requestId: string
-  options: PermissionOption[]
-  purpose?: string
-  path?: string
-  // diff-review payload (fs-write only): current on-disk text vs requested
-  // text. isNew=true means the file does not exist yet (create).
-  oldText?: string
-  newText?: string
-  isNew?: boolean
-  truncated?: boolean
-}
-
-export interface PermissionOption {
-  optionId?: string
-  name?: string
-  description?: string
-  kind?: string
-}
-
-interface AgentProjectState {
-  status: AgentState
-  messages: ChatMessage[]
-  tools: ToolCard[]
-  pendingPermissions: PendingPermission[]
-  harness: string | null
-}
+export type { AgentState } from './agentTimeline'
+export type {
+  TimelineItem,
+  MessageItem,
+  ToolItem,
+  PermissionItem,
+  PermissionOption,
+} from './agentTimeline'
 
 interface AgentContextValue {
   state: Record<string, AgentProjectState>
+  sessions: Record<string, SessionMeta[]>
+  activeSession: Record<string, string | null>
   harnesses: HarnessInfo[]
   send: (projectId: string, text: string) => Promise<void>
   start: (projectId: string, harnessName: string) => Promise<void>
   stop: (projectId: string) => Promise<void>
-   newSession: (projectId: string) => Promise<void>
+  newSession: (projectId: string) => Promise<void>
+  clearTranscript: (projectId: string) => Promise<void>
   respondPermission: (
     projectId: string,
     requestId: string,
     optionId: string,
     cancel: boolean,
   ) => Promise<void>
+  listSessions: (projectId: string) => Promise<void>
+  openSession: (projectId: string, sessionID: string) => Promise<void>
+  deleteSession: (projectId: string, sessionID: string) => Promise<string | null>
+  renameSession: (sessionID: string, title: string) => Promise<void>
   /** One-shot prompt turn with the last agent text captured (AI commit msg). */
   generateCommit: (projectId: string, prompt: string) => Promise<string>
 }
 
-const emptyState: AgentProjectState = {
-  status: 'no-harness',
-  messages: [],
-  tools: [],
-  pendingPermissions: [],
-  harness: null,
-}
-
-const AgentContext = createContext<AgentContextValue | null>(null)
-
-let idSeq = 0
-const nextId = () => `m${++idSeq}`
-
-// asPermissionOption coerces the flexible ACP permission option entries into
-// the shape the panel renders.
-const asPermissionOption = (o: unknown): PermissionOption | null => {
-  if (typeof o !== 'object' || o === null) return null
-  const m = o as Record<string, unknown>
-  const optionId = typeof m.optionId === 'string' ? m.optionId : undefined
-  const name = typeof m.name === 'string' ? m.name : undefined
-  if (!optionId && !name) return null
-  return {
-    optionId,
-    name,
-    description: typeof m.description === 'string' ? m.description : undefined,
-    kind: typeof m.kind === 'string' ? m.kind : undefined,
-  }
-}
-
-// entriesToMessages maps persisted transcript entries to chat messages.
-const entriesToMessages = (entries: Entry[]): ChatMessage[] =>
-  entries.map((e) => ({
-    id: nextId(),
-    role: (e.role === 'user' || e.role === 'system'
-      ? e.role
-      : 'agent') as ChatMessage['role'],
-    text: e.text,
-    kind: e.kind === 'error' ? 'error' : 'text',
-  }))
+const emptySessions: Record<string, SessionMeta[]> = {}
 
 export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   const [state, setState] = useState<Record<string, AgentProjectState>>({})
+  const [sessions, setSessions] =
+    useState<Record<string, SessionMeta[]>>(emptySessions)
+  const [activeSession, setActiveSession] = useState<
+    Record<string, string | null>
+  >({})
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([])
 
   const patch = useCallback(
     (projectId: string, fn: (s: AgentProjectState) => AgentProjectState) => {
       setState((prev) => ({
         ...prev,
-        [projectId]: fn(prev[projectId] ?? emptyState),
+        [projectId]: fn(prev[projectId] ?? emptyAgentState()),
       }))
     },
     [],
   )
 
-  // Initial harness list + transcript pull happens per active project (below);
-  // here we only subscribe to events once.
+  const refreshSessions = useCallback(async (projectId: string) => {
+    try {
+      const list = await App.ACPSessions(projectId)
+      setSessions((prev) => ({ ...prev, [projectId]: list ?? [] }))
+      setActiveSession((prev) => ({
+        ...prev,
+        [projectId]: prev[projectId] ?? (list?.[0]?.id ?? null),
+      }))
+    } catch {
+      setSessions((prev) => ({ ...prev, [projectId]: [] }))
+    }
+  }, [])
+
   useEffect(() => {
     const onMsg = Events.On('acp.msg', (ev: any) => {
-      const { projectId, role, text, kind } = (ev.data ?? {}) as {
-        projectId?: string
-        role?: string
-        text?: string
-        kind?: string
-      }
+      const { projectId, role, text, kind } = ev.data ?? {}
       if (!projectId || !text) return
-      patch(projectId, (s) => {
-        // Chunk merge invariant: the backend streams an agent reply as
-        // kind:'chunk' events. The FIRST chunk must create a message with
-        // kind 'chunk'; every subsequent chunk appends to that tail message
-        // (agent role + kind 'chunk'). A chunk must never fall through to the
-        // "create message" branch while a chunk tail exists, or the reply
-        // splits into multiple bubbles.
-        const tail = s.messages[s.messages.length - 1]
-        if (kind === 'chunk') {
-          if (tail && tail.role === 'agent' && tail.kind === 'chunk') {
-            return {
-              ...s,
-              messages: [
-                ...s.messages.slice(0, -1),
-                { ...tail, text: tail.text + text },
-              ],
-            }
-          }
-          return {
-            ...s,
-            messages: [
-              ...s.messages,
-              { id: nextId(), role: 'agent', text, kind: 'chunk' },
-            ],
-          }
-        }
-        const msgRole: ChatMessage['role'] =
-          role === 'user' ? 'user' : role === 'system' ? 'system' : 'agent'
-        const msgKind: ChatMessage['kind'] = kind === 'error' ? 'error' : 'text'
-        return {
-          ...s,
-          messages: [...s.messages, { id: nextId(), role: msgRole, text, kind: msgKind }],
-        }
-      })
+      patch(projectId, (s) => reduceMsg(s, { role, text, kind }))
     })
     const onTool = Events.On('acp.tool', (ev: any) => {
-      const { projectId, toolCallId, title, kind, status, content } = (ev.data ??
-        {}) as {
-        projectId?: string
-        toolCallId?: string
-        title?: string
-        kind?: string
-        status?: string
-        content?: string
-      }
+      const { projectId, toolCallId, title, kind, status, content } =
+        ev.data ?? {}
       if (!projectId || !toolCallId) return
-      patch(projectId, (s) => {
-        const idx = s.tools.findIndex((t) => t.toolCallId === toolCallId)
-        const card: ToolCard = {
-          toolCallId,
-          title: title ?? (idx >= 0 ? s.tools[idx].title : ''),
-          kind: kind ?? (idx >= 0 ? s.tools[idx].kind : 'other'),
-          status: status ?? (idx >= 0 ? s.tools[idx].status : 'pending'),
-          content: content ?? (idx >= 0 ? s.tools[idx].content : ''),
-        }
-        const tools =
-          idx >= 0
-            ? s.tools.map((t, i) => (i === idx ? card : t))
-            : [...s.tools, card]
-        return { ...s, tools }
-      })
+      patch(projectId, (s) =>
+        reduceTool(s, { toolCallId, title, kind, status, content }),
+      )
     })
     const onPermission = Events.On('acp.permission', (ev: any) => {
-      const { projectId, requestId, options, purpose, path, oldText, newText, isNew, truncated } =
-        (ev.data ?? {}) as {
-          projectId?: string
-          requestId?: string
-          options?: unknown
-          purpose?: string
-          path?: string
-          oldText?: string
-          newText?: string
-          isNew?: boolean
-          truncated?: boolean
-        }
+      const {
+        projectId,
+        requestId,
+        options,
+        purpose,
+        path,
+        oldText,
+        newText,
+        isNew,
+        truncated,
+      } = ev.data ?? {}
       if (!projectId || !requestId) return
-      const opts = Array.isArray(options)
-        ? (options.map(asPermissionOption).filter(Boolean) as PermissionOption[])
-        : []
-      patch(projectId, (s) => ({
-        ...s,
-        // stacked permissions: append; duplicates (same requestId) ignored
-        pendingPermissions: s.pendingPermissions.some(
-          (p) => p.requestId === requestId,
-        )
-          ? s.pendingPermissions
-          : [
-              ...s.pendingPermissions,
-              {
-                requestId,
-                options: opts,
-                purpose,
-                path,
-                oldText,
-                newText,
-                isNew,
-                truncated,
-              },
-            ],
-      }))
+      const opts = (Array.isArray(options) ? options : [])
+        .map(asPermissionOption)
+        .filter(Boolean) as PermissionOption[]
+      patch(projectId, (s) =>
+        reducePermission(s, {
+          type: 'permission',
+          requestId,
+          options: opts,
+          purpose,
+          path,
+          oldText,
+          newText,
+          isNew,
+          truncated,
+        }),
+      )
     })
     const onState = Events.On('acp.state', (ev: any) => {
-      const { projectId, state: st } = (ev.data ?? {}) as {
-        projectId?: string
-        state?: AgentState
-      }
+      const { projectId, state: st } = ev.data ?? {}
       if (!projectId || !st) return
-      patch(projectId, (s) => ({
-        ...s,
-        status: st,
-        // a state flip means the turn ended/timed out server-side; drop the
-        // whole stack (the backend answers every pending request on timeout)
-        pendingPermissions: st === 'thinking' ? s.pendingPermissions : [],
-      }))
+      patch(projectId, (s) => reduceStateFlip(s, st))
     })
     const onTranscript = Events.On('acp.transcript', (ev: any) => {
-      const { projectId, entries } = (ev.data ?? {}) as {
-        projectId?: string
-        entries?: Entry[]
-      }
+      const { projectId, sessionID, entries } = ev.data ?? {}
       if (!projectId) return
-      patch(projectId, (s) => ({
-        ...s,
-        messages: entriesToMessages(entries ?? []),
-        tools: [],
-      }))
+      patch(projectId, (s) =>
+        reduceTranscript({ ...s, sessionId: sessionID ?? s.sessionId }, entries ?? []),
+      )
+      if (sessionID) setActiveSession((prev) => ({ ...prev, [projectId]: sessionID }))
+      void refreshSessions(projectId)
     })
     const onRemoved = Events.On('project.removed', (ev: any) => {
-      const { id } = (ev.data ?? {}) as { id?: string }
+      const { id } = ev.data ?? {}
       if (!id) return
       setState((prev) => {
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
+      setSessions((prev) => {
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
+      setActiveSession((prev) => {
         const next = { ...prev }
         delete next[id]
         return next
@@ -284,10 +177,8 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({
       onTranscript()
       onRemoved()
     }
-  }, [patch])
+  }, [patch, refreshSessions])
 
-  // Load harness list once; refresh transcript when the active project
-  // changes so the panel shows persisted history on open.
   const { activeId } = useProjects()
   useEffect(() => {
     App.ACPHarnesses()
@@ -295,23 +186,104 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({
       .catch(() => setHarnesses([]))
   }, [])
 
+  // Refresh sessions + pull the persisted transcript when the active project
+  // changes so the panel shows history on open (the live `acp.transcript`
+  // event only fires on backend-side transitions).
   useEffect(() => {
     if (!activeId) return
+    void refreshSessions(activeId)
     App.ACPLoadTranscript(activeId)
       .then((entries) =>
-        patch(activeId, (s) => ({
-          ...s,
-          messages: entriesToMessages(entries ?? []),
-        })),
+        patch(activeId, (s) => reduceTranscript(s, entries ?? [])),
       )
       .catch(() => {})
-  }, [activeId, patch])
+  }, [activeId, patch, refreshSessions])
 
-  const send = useCallback(
-    async (projectId: string, text: string) => {
-      await App.ACPSendPrompt(projectId, text)
+  const send = useCallback(async (projectId: string, text: string) => {
+    await App.ACPSendPrompt(projectId, text)
+  }, [])
+
+  const start = useCallback(
+    async (projectId: string, harnessName: string) => {
+      await App.ACPStart(projectId, harnessName)
+      patch(projectId, (s) => ({ ...s, harness: harnessName }))
+      void refreshSessions(projectId)
+    },
+    [patch, refreshSessions],
+  )
+
+  const stop = useCallback(
+    async (projectId: string) => {
+      await App.ACPStop(projectId)
+      patch(projectId, (s) => ({ ...s, harness: null }))
+    },
+    [patch],
+  )
+
+  const newSession = useCallback(
+    async (projectId: string) => {
+      await App.ACPNewSession(projectId)
+      // the backend emits an (empty) acp.transcript + sessions refresh after
+      // spawning the fresh session
+      void refreshSessions(projectId)
+    },
+    [refreshSessions],
+  )
+
+  const clearTranscript = useCallback(
+    async (projectId: string) => {
+      await App.ACPClearTranscript(projectId)
+      void refreshSessions(projectId)
+    },
+    [refreshSessions],
+  )
+
+  const respondPermission = useCallback(
+    async (
+      projectId: string,
+      requestId: string,
+      optionId: string,
+      cancel: boolean,
+    ) => {
+      await App.ACPRespondPermission(projectId, requestId, optionId, cancel)
+      // resolve only the matching card, not the whole stack
+      patch(projectId, (s) => removePermission(s, requestId))
+    },
+    [patch],
+  )
+
+  const listSessions = useCallback(
+    async (projectId: string) => void refreshSessions(projectId),
+    [refreshSessions],
+  )
+
+  const openSession = useCallback(
+    async (projectId: string, sessionID: string) => {
+      await App.ACPOpenSession(projectId, sessionID)
+      setActiveSession((prev) => ({ ...prev, [projectId]: sessionID }))
     },
     [],
+  )
+
+  const deleteSession = useCallback(
+    async (projectId: string, sessionID: string): Promise<string | null> => {
+      try {
+        await App.ACPDeleteSession(projectId, sessionID)
+        await refreshSessions(projectId)
+        return null
+      } catch (e) {
+        return String(e)
+      }
+    },
+    [refreshSessions],
+  )
+
+  const renameSession = useCallback(
+    async (sessionID: string, title: string) => {
+      await App.ACPRenameSession(sessionID, title)
+      if (activeId) void refreshSessions(activeId)
+    },
+    [activeId, refreshSessions],
   )
 
   // generateCommit runs one synchronous prompt turn and resolves with the
@@ -367,67 +339,47 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({
     [],
   )
 
-  const start = useCallback(
-    async (projectId: string, harnessName: string) => {
-      await App.ACPStart(projectId, harnessName)
-      patch(projectId, (s) => ({ ...s, harness: harnessName }))
-    },
-    [patch],
-  )
-
-  const stop = useCallback(
-    async (projectId: string) => {
-      await App.ACPStop(projectId)
-      patch(projectId, (s) => ({ ...s, harness: null }))
-    },
-    [patch],
-  )
-
-  const newSession = useCallback(
-    async (projectId: string) => {
-      await App.ACPNewSession(projectId)
-      // backend emits acp.transcript (reset marker) on respawn; also clear
-      // live-streamed tools locally in case the event races
-      patch(projectId, (s) => ({ ...s, tools: [] }))
-    },
-    [patch],
-  )
-
-  const respondPermission = useCallback(
-    async (
-      projectId: string,
-      requestId: string,
-      optionId: string,
-      cancel: boolean,
-    ) => {
-      await App.ACPRespondPermission(projectId, requestId, optionId, cancel)
-      // resolve only the matching card, not the whole stack
-      patch(projectId, (s) => ({
-        ...s,
-        pendingPermissions: s.pendingPermissions.filter(
-          (p) => p.requestId !== requestId,
-        ),
-      }))
-    },
-    [patch],
-  )
-
   return (
     <AgentContext.Provider
       value={{
         state,
+        sessions,
+        activeSession,
         harnesses,
         send,
         start,
         stop,
         newSession,
+        clearTranscript,
         respondPermission,
+        listSessions,
+        openSession,
+        deleteSession,
+        renameSession,
         generateCommit,
       }}
     >
       {children}
     </AgentContext.Provider>
   )
+}
+
+const AgentContext = createContext<AgentContextValue | null>(null)
+
+// asPermissionOption coerces the flexible ACP permission option entries into
+// the shape the panel renders.
+const asPermissionOption = (o: unknown): PermissionOption | null => {
+  if (typeof o !== 'object' || o === null) return null
+  const m = o as Record<string, unknown>
+  const optionId = typeof m.optionId === 'string' ? m.optionId : undefined
+  const name = typeof m.name === 'string' ? m.name : undefined
+  if (!optionId && !name) return null
+  return {
+    optionId,
+    name,
+    description: typeof m.description === 'string' ? m.description : undefined,
+    kind: typeof m.kind === 'string' ? m.kind : undefined,
+  }
 }
 
 export const useAgent = (): AgentContextValue => {

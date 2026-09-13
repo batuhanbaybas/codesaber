@@ -127,7 +127,7 @@ export const reducePermission = (
     (i) => i.type === 'permission' && i.requestId === p.requestId,
   )
   if (exists) return s
-  return { ...s, timeline: [...s.timeline, { type: 'permission' as const, ...p }] }
+  return { ...s, timeline: [...s.timeline, { ...p, type: 'permission' as const }] }
 }
 
 // removePermission drops the resolved card.
