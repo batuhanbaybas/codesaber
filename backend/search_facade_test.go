@@ -32,7 +32,7 @@ func TestSearchFacade_FindsMatchesSkippingGitDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := app.SearchText(p.ID, "go", false)
+	res, err := app.SearchText(p.ID, "go", false, false, "", "")
 	if err != nil {
 		t.Fatalf("SearchText: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestSearchFacade_TruncationFlag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := app.SearchText(p.ID, "go", false)
+	res, err := app.SearchText(p.ID, "go", false, false, "", "")
 	if err != nil {
 		t.Fatalf("SearchText: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestSearchFacade_TruncationFlag(t *testing.T) {
 
 func TestSearchFacade_UnknownProject(t *testing.T) {
 	app, _ := newTestApp(t)
-	if _, err := app.SearchText("nope", "go", false); err == nil {
+	if _, err := app.SearchText("nope", "go", false, false, "", ""); err == nil {
 		t.Fatal("expected error for unknown project")
 	}
 }
@@ -87,7 +87,7 @@ func TestSearchFacade_SequentialCallsAndRemoveCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 3; i++ {
-		res, err := app.SearchText(p.ID, "go", false)
+		res, err := app.SearchText(p.ID, "go", false, false, "", "")
 		if err != nil {
 			t.Fatalf("SearchText #%d: %v", i, err)
 		}

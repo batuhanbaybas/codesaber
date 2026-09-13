@@ -1,8 +1,11 @@
 // Package search implements parallel project-wide text search. It walks the
 // project tree applying the same skip rules as the file index (dotfiles except
-// .env/.gitignore/.github, vendored/build dirs, binary extensions), then scans
-// remaining files with a bounded worker pool. Results are capped (matches and
-// files) with a Truncated flag; cancellation flows through context.Context.
+// .env/.gitignore/.github, vendored/build dirs, binary extensions), filters
+// files through Query.Include/Query.Exclude comma-separated doublestar globs
+// ('/'-normalized rel paths), then scans remaining files with a bounded
+// worker pool. Literal mode is raw-byte contains when Query.CaseSensitive,
+// else case-folded. Results are capped (matches and files) with a Truncated
+// flag; cancellation flows through context.Context.
 package search
 
 import (
@@ -46,11 +49,14 @@ type Result struct {
 // Query describes one search. MaxSizeMB/MaxMatches/MaxFiles are knobs for
 // tests and callers; zero means the documented default.
 type Query struct {
-	Term       string
-	Regex      bool
-	MaxSizeMB  int // per-file size limit; 0 = 10MB
-	MaxMatches int // total match cap;    0 = 2000
-	MaxFiles   int // file result cap;    0 = 200
+	Term          string
+	Regex         bool
+	CaseSensitive bool   // literal mode: raw contains; regex mode: not case-insensitive
+	Include       string // comma-separated globs to keep, e.g. "*.ts, src/**"
+	Exclude       string // comma-separated globs to drop, e.g. "*.md, docs/**"
+	MaxSizeMB     int    // per-file size limit; 0 = 10MB
+	MaxMatches    int    // total match cap;    0 = 2000
+	MaxFiles      int    // file result cap;    0 = 200
 }
 
 const (
@@ -124,10 +130,13 @@ func collect(root string) ([]string, error) {
 	return files, nil
 }
 
-// Search runs q over the tree rooted at root. Literal mode is case-insensitive
-// via strings.ToLower folding on both term and lines (byte-offset columns are
-// approximate when folding changes byte lengths); regex mode compiles the
-// pattern case-insensitively. Files are scanned by min(NumCPU, 16) workers.
+// Search runs q over the tree rooted at root. Literal mode uses raw-byte
+// contains when q.CaseSensitive, else case-folded comparisons via
+// strings.ToLower on both term and lines (byte-offset columns are approximate
+// when folding changes byte lengths); regex mode compiles the pattern with
+// (?i) unless q.CaseSensitive. Files are filtered through the
+// include/exclude globs (rel '/'-separated paths) and scanned by
+// min(NumCPU, 16) workers.
 func Search(root string, q Query, ctx context.Context) (Result, error) {
 	if strings.TrimSpace(q.Term) == "" {
 		return Result{}, errors.New("search: empty term")
@@ -149,17 +158,38 @@ func Search(root string, q Query, ctx context.Context) (Result, error) {
 	term := q.Term
 	if q.Regex {
 		var err error
-		re, err = regexp.Compile("(?i)" + q.Term)
+		pat := q.Term
+		if !q.CaseSensitive {
+			pat = "(?i)" + pat
+		}
+		re, err = regexp.Compile(pat)
 		if err != nil {
 			return Result{}, fmt.Errorf("search: %w", err)
 		}
-	} else {
+	} else if !q.CaseSensitive {
 		term = strings.ToLower(q.Term)
 	}
 
 	files, err := collect(root)
 	if err != nil {
 		return Result{}, err
+	}
+
+	filter := globFilter(q.Include, q.Exclude)
+	if filter != nil {
+		rootPrefix := filepath.Clean(root) + string(filepath.Separator)
+		kept := files[:0]
+		for _, f := range files {
+			rel := strings.TrimPrefix(strings.TrimPrefix(f, rootPrefix), string(filepath.Separator))
+			rel = filepath.ToSlash(rel)
+			if filter(rel) {
+				kept = append(kept, f)
+			}
+		}
+		files = kept
+	}
+	if len(files) == 0 {
+		return Result{}, nil
 	}
 
 	// runCtx is canceled internally once a cap is hit; the parent ctx still
@@ -174,7 +204,7 @@ func Search(root string, q Query, ctx context.Context) (Result, error) {
 
 	worker := func() {
 		for idx := range paths {
-			fm, stop := scanFile(runCtx, files[idx], term, re, maxSize, maxMatches)
+			fm, stop := scanFile(runCtx, files[idx], term, re, maxSize, maxMatches, q.CaseSensitive)
 			mu.Lock()
 			add := len(fm.Matches)
 			over := stop
@@ -260,7 +290,7 @@ func scanFile(
 	ctx context.Context,
 	path string,
 	term string, re *regexp.Regexp,
-	maxSize int64, maxMatches int,
+	maxSize int64, maxMatches int, caseSensitive bool,
 ) (FileMatches, bool) {
 	fm := FileMatches{Path: path}
 	info, err := os.Stat(path)
@@ -284,7 +314,7 @@ func scanFile(
 		default:
 		}
 		line := sc.Text()
-		for _, m := range lineMatches(line, term, re) {
+		for _, m := range lineMatches(line, term, re, caseSensitive) {
 			if len(fm.Matches) >= maxMatches {
 				return fm, true
 			}
@@ -299,14 +329,28 @@ func scanFile(
 }
 
 // lineMatches returns the 0-based byte offsets of every match in line.
-// Literal mode folds both sides with strings.ToLower; the folded offset is
-// reused against the raw line (approximate for multi-byte case folds).
-func lineMatches(line, term string, re *regexp.Regexp) []int {
+// Regex mode uses re. Literal mode: if caseSensitive, raw-byte contains on
+// the line; otherwise both sides are folded with strings.ToLower and the
+// folded offset is reused against the raw line (approximate for multi-byte
+// case folds).
+func lineMatches(line, term string, re *regexp.Regexp, caseSensitive bool) []int {
 	if re != nil {
 		locs := re.FindAllIndex([]byte(line), -1)
 		out := make([]int, 0, len(locs))
 		for _, l := range locs {
 			out = append(out, l[0])
+		}
+		return out
+	}
+	if caseSensitive {
+		var out []int
+		for off := 0; ; {
+			j := strings.Index(line[off:], term)
+			if j < 0 {
+				break
+			}
+			out = append(out, off+j)
+			off += j + len(term)
 		}
 		return out
 	}

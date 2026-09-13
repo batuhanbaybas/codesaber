@@ -442,7 +442,11 @@ const searchTimeout = 20 * time.Second
 // SearchText runs a project-wide text search and returns the full result
 // synchronously (MVP: no streaming; a new call for the same project cancels
 // the previous one, and the frontend drops superseded responses by seq).
-func (a *App) SearchText(projectID, term string, regex bool) (search.Result, error) {
+func (a *App) SearchText(
+	projectID, term string,
+	regex, caseSensitive bool,
+	include, exclude string,
+) (search.Result, error) {
 	root, err := a.resolveRoot(projectID)
 	if err != nil {
 		return search.Result{}, err
@@ -463,7 +467,13 @@ func (a *App) SearchText(projectID, term string, regex bool) (search.Result, err
 		cancel()
 		a.searchMu.Unlock()
 	}()
-	return search.Search(root, search.Query{Term: term, Regex: regex}, ctx)
+	return search.Search(root, search.Query{
+		Term:         term,
+		Regex:        regex,
+		CaseSensitive: caseSensitive,
+		Include:      include,
+		Exclude:      exclude,
+	}, ctx)
 }
 
 // resolveRoot returns the absolute project root for the given project ID.

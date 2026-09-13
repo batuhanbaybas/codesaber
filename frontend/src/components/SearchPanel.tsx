@@ -9,18 +9,19 @@ const relOf = (root: string, path: string) =>
   root && path.startsWith(root + '/') ? path.slice(root.length + 1) : path
 
 // Snippet renders the match line with the matched substring highlighted
-// (accent bg). Literal mode highlights the first case-folded occurrence;
-// regex mode highlights the first match per line only (MVP).
-const Snippet: React.FC<{ m: Match; term: string; regex: boolean }> = ({
+// (accent bg). Literal mode highlights the first occurrence (raw or
+// case-folded); regex mode highlights the first match per line only (MVP).
+const Snippet: React.FC<{ m: Match; term: string; regex: boolean; caseSensitive: boolean }> = ({
   m,
   term,
   regex,
+  caseSensitive,
 }) => {
   let start = -1
   let end = -1
   if (regex && term) {
     try {
-      const re = new RegExp(term, 'i')
+      const re = new RegExp(term, caseSensitive ? '' : 'i')
       const hit = re.exec(m.text)
       if (hit) {
         start = hit.index
@@ -30,7 +31,9 @@ const Snippet: React.FC<{ m: Match; term: string; regex: boolean }> = ({
       // invalid pattern: no highlight
     }
   } else if (term) {
-    const idx = m.text.toLowerCase().indexOf(term.toLowerCase())
+    const hay = caseSensitive ? m.text : m.text.toLowerCase()
+    const needle = caseSensitive ? term : term.toLowerCase()
+    const idx = hay.indexOf(needle)
     if (idx >= 0) {
       start = idx
       end = idx + term.length
@@ -53,8 +56,9 @@ const FileCard: React.FC<{
   fm: { path: string; matches: Match[] | null }
   term: string
   regex: boolean
+  caseSensitive: boolean
   onOpen: (path: string, m: Match) => void
-}> = ({ root, fm, term, regex, onOpen }) => {
+}> = ({ root, fm, term, regex, caseSensitive, onOpen }) => {
   const [open, setOpen] = useState(true)
   const matches = fm.matches ?? []
   return (
@@ -92,7 +96,7 @@ const FileCard: React.FC<{
                 {m.line}:{m.col}
               </span>
               <span className="truncate text-[#d6d7da]">
-                <Snippet m={m} term={term} regex={regex} />
+                <Snippet m={m} term={term} regex={regex} caseSensitive={caseSensitive} />
               </span>
             </button>
           ))}
@@ -107,6 +111,9 @@ const SearchPanel: React.FC = () => {
   const { openFile } = useTabs()
   const [term, setTerm] = useState('')
   const [regex, setRegex] = useState(false)
+  const [caseSensitive, setCaseSensitive] = useState(false)
+  const [include, setInclude] = useState('')
+  const [exclude, setExclude] = useState('')
   const [result, setResult] = useState<Result | null>(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -115,6 +122,32 @@ const SearchPanel: React.FC = () => {
   const seqRef = useRef(0)
   const project = projects.find((p) => p.id === activeId)
   const root = project?.root ?? ''
+  const loadedProjectRef = useRef<string | null>(null)
+
+  // Restore per-project include/exclude/caseSensitivity prefs.
+  useEffect(() => {
+    if (!activeId || loadedProjectRef.current === activeId) return
+    loadedProjectRef.current = activeId
+    try {
+      const raw = localStorage.getItem(`aide.search.${activeId}`)
+      const prefs = raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
+      setInclude(typeof prefs.include === 'string' ? prefs.include : '')
+      setExclude(typeof prefs.exclude === 'string' ? prefs.exclude : '')
+      setCaseSensitive(prefs.caseSensitive === true)
+    } catch {
+      setInclude('')
+      setExclude('')
+    }
+  }, [activeId])
+
+  // Persist prefs on change (after restore).
+  useEffect(() => {
+    if (!activeId || loadedProjectRef.current !== activeId) return
+    localStorage.setItem(
+      `aide.search.${activeId}`,
+      JSON.stringify({ include, exclude, caseSensitive }),
+    )
+  }, [activeId, include, exclude, caseSensitive])
 
   // Auto-focus on mount and whenever the rail/⌘⇧F requests it.
   useEffect(() => {
@@ -140,7 +173,7 @@ const SearchPanel: React.FC = () => {
     const seq = ++seqRef.current
     setRunning(true)
     const timer = window.setTimeout(() => {
-      App.SearchText(activeId, trimmed, regex)
+      App.SearchText(activeId, trimmed, regex, caseSensitive, include.trim(), exclude.trim())
         .then((res) => {
           if (seqRef.current !== seq) return
           setResult(res ?? null)
@@ -156,7 +189,7 @@ const SearchPanel: React.FC = () => {
         })
     }, 250)
     return () => window.clearTimeout(timer)
-  }, [term, regex, activeId])
+  }, [term, regex, caseSensitive, include, exclude, activeId])
 
   const onOpen = (path: string, m: Match) => {
     if (!activeId) return
@@ -204,6 +237,38 @@ const SearchPanel: React.FC = () => {
         </button>
       </div>
 
+      {/* Filter row: Aa toggle + include/exclude globs */}
+      <div className="shrink-0 flex items-center gap-2 mb-2">
+        <button
+          className={
+            'no-drag h-7 w-8 rounded-lg border font-mono text-[11px] shrink-0 ' +
+            (caseSensitive
+              ? 'border-[var(--accent)] text-primary bg-white/10'
+              : 'border-[#333639] bg-[#242629] text-dim hover:text-primary hover:border-[#4a4f55]')
+          }
+          title="Match case"
+          aria-label="Toggle case sensitivity"
+          aria-pressed={caseSensitive}
+          onClick={() => setCaseSensitive((c) => !c)}
+        >
+          Aa
+        </button>
+        <input
+          className="no-drag min-w-0 flex-1 h-7 px-2 rounded-lg border border-[#333639] bg-[#242629] text-primary placeholder:text-dim/70 outline-none focus:border-[#4a4f55]"
+          placeholder="include: *.ts, src/**"
+          value={include}
+          onChange={(e) => setInclude(e.target.value)}
+          aria-label="Include glob patterns"
+        />
+        <input
+          className="no-drag min-w-0 flex-1 h-7 px-2 rounded-lg border border-[#333639] bg-[#242629] text-primary placeholder:text-dim/70 outline-none focus:border-[#4a4f55]"
+          placeholder="exclude: *.md, test/**"
+          value={exclude}
+          onChange={(e) => setExclude(e.target.value)}
+          aria-label="Exclude glob patterns"
+        />
+      </div>
+
       {/* Count line */}
       <div className="shrink-0 flex items-center text-dim mb-2 min-h-4">
         {error ? (
@@ -231,6 +296,7 @@ const SearchPanel: React.FC = () => {
             fm={fm}
             term={term.trim()}
             regex={regex}
+            caseSensitive={caseSensitive}
             onOpen={onOpen}
           />
         ))}

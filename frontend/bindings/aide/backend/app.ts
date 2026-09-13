@@ -359,8 +359,8 @@ export function SaveFile(path: string, content: string): $CancellablePromise<voi
  * synchronously (MVP: no streaming; a new call for the same project cancels
  * the previous one, and the frontend drops superseded responses by seq).
  */
-export function SearchText(projectID: string, term: string, regex: boolean): $CancellablePromise<search$0.Result> {
-    return $Call.ByID(1393198271, projectID, term, regex);
+export function SearchText(projectID: string, term: string, regex: boolean, caseSensitive: boolean, include: string, exclude: string): $CancellablePromise<search$0.Result> {
+    return $Call.ByID(1393198271, projectID, term, regex, caseSensitive, include, exclude);
 }
 
 /**

@@ -210,3 +210,88 @@ func TestSearch_MissingRoot(t *testing.T) {
 		t.Fatal("expected error for missing root")
 	}
 }
+
+// --- case sensitivity + include/exclude globs (feat 7.3) ---
+
+func writeTree2(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	mk := func(rel, content string) {
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("main.ts", "const Go = 1\nconst go = 2\n")
+	mk("src/util.ts", "Go again\nGO again\n")
+	mk("docs/readme.md", "Go here\n")
+	mk("main_test.go", "Go test\n")
+	return root
+}
+
+func TestSearch_CaseSensitiveToggle(t *testing.T) {
+	root := writeTree2(t)
+	res, err := Search(root, Query{Term: "Go", CaseSensitive: true}, context.Background())
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	// main.ts line1, src/util.ts line1 only. main_test.go line1. docs? "Go here" yes.
+	if res.Matches != 4 {
+		t.Fatalf("case-sensitive matches = %d, want 4: %+v", res.Matches, res)
+	}
+	ins, err := Search(root, Query{Term: "Go"}, context.Background())
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	// case-insensitive: everything above + "go" on main.ts line2, util.ts line2.
+	if ins.Matches != 6 {
+		t.Fatalf("case-insensitive matches = %d, want 6: %+v", ins.Matches, ins)
+	}
+}
+
+func TestSearch_IncludeGlobFiltersFiles(t *testing.T) {
+	root := writeTree2(t)
+	res, err := Search(root, Query{Term: "go", Include: "*.ts, src/*.ts"}, context.Background())
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if res.Files != 2 || res.Matches != 4 {
+		t.Fatalf("got files=%d matches=%d, want 2/4: %+v", res.Files, res.Matches, res)
+	}
+	for _, fm := range res.FilesMatches {
+		if !strings.HasSuffix(fm.Path, ".ts") {
+			t.Fatalf("non-ts file leaked: %s", fm.Path)
+		}
+	}
+}
+
+func TestSearch_ExcludeGlobFiltersFiles(t *testing.T) {
+	root := writeTree2(t)
+	res, err := Search(root, Query{Term: "go", Exclude: "**/*_test.go, **/*.md"}, context.Background())
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	// main.ts(2) + src/util.ts(2) = 4; *_test.go and *.md excluded.
+	if res.Files != 2 || res.Matches != 4 {
+		t.Fatalf("got files=%d matches=%d, want 2/4: %+v", res.Files, res.Matches, res)
+	}
+	for _, fm := range res.FilesMatches {
+		if strings.HasSuffix(fm.Path, "_test.go") || strings.HasSuffix(fm.Path, ".md") {
+			t.Fatalf("excluded file leaked: %s", fm.Path)
+		}
+	}
+}
+
+func TestSearch_IncludeExcludeKeepCapsAndRegex(t *testing.T) {
+	root := writeTree2(t)
+	res, err := Search(root, Query{Term: "g.", Regex: true, Include: "**/*.ts", MaxMatches: 3}, context.Background())
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if res.Matches != 3 || !res.Truncated {
+		t.Fatalf("regex+include matches=%d truncated=%v, want 3/true: %+v", res.Matches, res.Truncated, res)
+	}
+}
