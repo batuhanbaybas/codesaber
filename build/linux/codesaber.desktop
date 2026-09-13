@@ -1,13 +1,10 @@
 [Desktop Entry]
 Version=1.0
-Name=My Product
-Comment=A aide application
-# The Exec line includes %u to pass the URL to the application
-Exec=/usr/local/bin/aide %u
+Name=CodeSaber
+Comment=CodeSaber — a lightweight, AI-native IDE built with Wails v3
+Exec=/usr/local/bin/codesaber %u
 Terminal=false
 Type=Application
-Icon=aide
-Categories=Utility;
-StartupWMClass=aide
-
- 
+Icon=codesaber
+Categories=Development;IDE;
+StartupWMClass=codesaber
