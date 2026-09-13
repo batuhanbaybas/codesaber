@@ -89,6 +89,7 @@ jobs:
       - name: Package (darwin)
         if: matrix.goos == 'darwin'
         run: |
+          export PATH="$HOME/go/bin:$PATH"
           wails3 task darwin:package ARCH=${{ matrix.goarch }}
           wails3 task darwin:create:dmg
           VER="${{ github.ref_name }}"
@@ -104,9 +105,12 @@ jobs:
           VER="${VER#v}"
           export GIT_TAG="${VER}"
           if [ "${{ matrix.goarch }}" = "amd64" ]; then
+            export PATH="$HOME/go/bin:$PATH"
             wails3 task linux:create:appimage
           fi
+          export PATH="$HOME/go/bin:$PATH"
           wails3 task linux:create:deb
+          export PATH="$HOME/go/bin:$PATH"
           wails3 task linux:create:rpm
           tar -czf "CodeSaber-${VER}-linux-${{ matrix.goarch }}.tar.gz" -C bin codesaber
           ls -la bin
