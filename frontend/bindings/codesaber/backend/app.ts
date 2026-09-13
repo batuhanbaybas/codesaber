@@ -116,6 +116,22 @@ export function CloseWelcome(): $CancellablePromise<void> {
 }
 
 /**
+ * CreateFile creates an empty file at path, creating parent directories as
+ * needed. Fails when the file already exists.
+ */
+export function CreateFile(path: string): $CancellablePromise<void> {
+    return $Call.ByID(1457150717, path);
+}
+
+/**
+ * CreateFolder creates the directory at path (including parents). Fails when
+ * the directory already exists.
+ */
+export function CreateFolder(path: string): $CancellablePromise<void> {
+    return $Call.ByID(1104706407, path);
+}
+
+/**
  * EnsureWorkspaceWindow opens the workspace window if none exists (or shows
  * the existing one). Called by the frontend after opening a project.
  */

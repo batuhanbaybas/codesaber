@@ -423,6 +423,59 @@ func (a *App) SaveFile(path, content string) error {
 	return a.buf.Save(path, content)
 }
 
+// validateProjectPath refuses paths outside any open project root, so the
+// create APIs can't be used to scribble anywhere on disk.
+func (a *App) validateProjectPath(path string) error {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("resolve %s: %w", path, err)
+	}
+	for _, p := range a.reg.List() {
+		root, err := filepath.Abs(p.Root)
+		if err != nil {
+			continue
+		}
+		if abs == root || strings.HasPrefix(abs, root+string(os.PathSeparator)) {
+			return nil
+		}
+	}
+	return fmt.Errorf("path %s is not inside an open project", path)
+}
+
+// CreateFile creates an empty file at path, creating parent directories as
+// needed. Fails when the file already exists.
+func (a *App) CreateFile(path string) error {
+	if err := a.validateProjectPath(path); err != nil {
+		return err
+	}
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("file already exists: %s", path)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create dirs for %s: %w", path, err)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", path, err)
+	}
+	return f.Close()
+}
+
+// CreateFolder creates the directory at path (including parents). Fails when
+// the directory already exists.
+func (a *App) CreateFolder(path string) error {
+	if err := a.validateProjectPath(path); err != nil {
+		return err
+	}
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("folder already exists: %s", path)
+	}
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return fmt.Errorf("create folder %s: %w", path, err)
+	}
+	return nil
+}
+
 // EnsureWorkspaceWindow opens the workspace window if none exists (or shows
 // the existing one). Called by the frontend after opening a project.
 func (a *App) EnsureWorkspaceWindow() {

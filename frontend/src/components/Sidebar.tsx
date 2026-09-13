@@ -116,6 +116,21 @@ const Sidebar: React.FC = () => {
               <button
                 onClick={(e) => {
                   e.stopPropagation()
+                  window.dispatchEvent(
+                    new CustomEvent('codesaber:filetree-new', {
+                      detail: { projectId: p.id },
+                    }),
+                  )
+                }}
+                className="no-drag px-1 text-dim hover:text-primary"
+                title="New file or folder"
+                aria-label={`New file or folder in ${p.name}`}
+              >
+                +
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
                   void remove(p.id)
                 }}
                 className="no-drag px-1 text-dim hover:text-primary"
