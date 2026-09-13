@@ -212,6 +212,28 @@ const Divider: React.FC = () => (
   <span className="w-px h-3.5 bg-[#3a3c3f]" aria-hidden="true" />
 )
 
+// StatusHint flashes a brief transient message via "aide:status-hint" window
+// events (e.g. ⌘K pressed with no selection). Auto-clears after 2.5s.
+const StatusHint: React.FC = () => {
+  const [text, setText] = useState('')
+  const timerRef = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    const onHint = (e: Event) => {
+      const detail = (e as CustomEvent<string>).detail
+      setText(detail ? String(detail) : 'select code to edit')
+      window.clearTimeout(timerRef.current)
+      timerRef.current = window.setTimeout(() => setText(''), 2500)
+    }
+    window.addEventListener('aide:status-hint', onHint)
+    return () => {
+      window.removeEventListener('aide:status-hint', onHint)
+      window.clearTimeout(timerRef.current)
+    }
+  }, [])
+  if (!text) return null
+  return <span className="text-primary">{text}</span>
+}
+
 const StatusBar: React.FC = () => {
   const { ui, toggle } = useLayout()
   const { activeId } = useProjects()
@@ -267,6 +289,7 @@ const StatusBar: React.FC = () => {
         </span>
         <EnginePills />
         <GoplsPill projectId={activeId} />
+        <StatusHint />
       </div>
       {/* RIGHT: cursor, indentation, encoding, language, version */}
       <div className="flex items-center gap-2.5">

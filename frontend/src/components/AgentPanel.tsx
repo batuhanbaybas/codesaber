@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import * as App from '../../bindings/aide/backend/app'
 import { useProjects } from '../state/projects'
 import {
   useAgent,
@@ -72,6 +73,55 @@ const AgentPanel: React.FC = () => {
   const [draft, setDraft] = useState('')
   const listRef = useRef<HTMLDivElement | null>(null)
   const taRef = useRef<HTMLTextAreaElement | null>(null)
+  // Per-project prompt history: seeded once from the persisted transcript
+  // (last 30 user entries), then appended by every composer send. idx walks
+  // with ↑/↓ when the composer is empty; it equals list.length for a fresh
+  // draft.
+  const histRef = useRef<Record<string, string[]>>({})
+  const histIdxRef = useRef<Record<string, number>>({})
+  const draftRef = useRef(draft)
+  draftRef.current = draft
+
+  useEffect(() => {
+    if (!activeId || histRef.current[activeId]) return
+    App.ACPLoadTranscript(activeId)
+      .then((entries) => {
+        if (histRef.current[activeId]) return
+        const list = (entries ?? [])
+          .filter((e) => e.role === 'user' && e.text.trim())
+          .slice(-30)
+          .map((e) => e.text)
+        histRef.current[activeId] = list
+        histIdxRef.current[activeId] = list.length
+      })
+      .catch(() => {})
+  }, [activeId])
+
+  // recall steps the history cursor by dir (-1 older, +1 newer) and fills the
+  // composer. It only engages when the composer is empty or already showing
+  // a recalled entry, so in-progress typing is never clobbered. Returns
+  // whether the cursor moved (↑/↓ carets in full textareas move it too), so
+  // the keydown handler can preventDefault selectively.
+  const recall = (dir: -1 | 1): boolean => {
+    if (!activeId) return false
+    const list = histRef.current[activeId]
+    if (!list || !list.length) return false
+    let idx = histIdxRef.current[activeId] ?? list.length
+    if (dir === -1) {
+      const cur = idx < list.length ? list[idx] : ''
+      if (draftRef.current.trim() && draftRef.current !== cur) return false
+      if (idx === list.length) idx = list.length - 1
+      else if (idx > 0) idx -= 1
+      else return false
+    } else {
+      if (idx >= list.length) return false
+      idx += 1
+    }
+    histIdxRef.current[activeId] = idx
+    setDraft(idx < list.length ? list[idx] : '')
+    requestAnimationFrame(grow)
+    return true
+  }
 
   const st = activeId ? state[activeId] : undefined
   const running = !!st?.harness && st.status !== 'harness-down' && st.status !== 'no-harness'
@@ -94,6 +144,9 @@ const AgentPanel: React.FC = () => {
   const doSend = () => {
     const text = draft.trim()
     if (!text || !activeId || thinking || !running) return
+    const hist = histRef.current[activeId] ?? (histRef.current[activeId] = [])
+    if (hist[hist.length - 1] !== text) hist.push(text)
+    histIdxRef.current[activeId] = hist.length
     setDraft('')
     requestAnimationFrame(grow)
     void send(activeId, text)
@@ -103,6 +156,14 @@ const AgentPanel: React.FC = () => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       doSend()
+      return
+    }
+    if (e.key === 'ArrowUp') {
+      if (recall(-1)) e.preventDefault()
+      return
+    }
+    if (e.key === 'ArrowDown') {
+      if (recall(1)) e.preventDefault()
     }
   }
 
@@ -231,12 +292,17 @@ const AgentPanel: React.FC = () => {
             grow()
           }}
           onKeyDown={onKeyDown}
-          placeholder={running ? 'Ask the agent…' : 'Start a harness first'}
+          placeholder={
+            running ? 'Ask the agent\u2026' : 'Start a harness first'
+          }
           disabled={!running || thinking}
           rows={1}
           className="no-drag w-full resize-none rounded bg-[#1e1f22] px-2 py-1 text-primary outline-none focus:ring-1 focus:ring-[var(--accent)] disabled:opacity-40"
         />
         <div className="flex items-center">
+          <span className="text-[10px] text-dim select-none">
+            {'\u2191'} history
+          </span>
           <button
             className="no-drag px-2 py-0.5 rounded bg-[#1e1f22] text-dim hover:text-primary disabled:opacity-40"
             disabled={!running}

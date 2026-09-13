@@ -1,4 +1,10 @@
-import React, { useEffect, useRef, useSyncExternalStore } from 'react'
+import React, {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 import {
   EditorState,
   StateEffect,
@@ -43,7 +49,19 @@ import DiffViewer from './DiffViewer'
 import MdPreview from './MdPreview'
 import { mdPreviewOn, subscribeMdPreview } from '../lib/mdpreview'
 import * as App from '../../bindings/aide/backend/app'
+import { useAgent } from '../state/agent'
 import * as LSP from '../lsp'
+
+// InlineKBarState is the floating ⌘K prompt bar: selection range it edits,
+// screen coords (relative to the tab wrapper) for placement, and turn status.
+interface InlineKBarState {
+  from: number
+  to: number
+  left: number
+  top: number
+  status: 'input' | 'running' | 'done' | 'error'
+  msg?: string
+}
 
 const languageFor = (path: string): Extension => {
   const name = path.slice(path.lastIndexOf('/') + 1).toLowerCase()
@@ -463,6 +481,85 @@ const lspTheme = EditorView.theme({  '.cm-lsp-diag-gutter': { width: '10px' },
   },
 })
 
+// InlineKBar is the floating prompt bar shown above the selection head.
+// Enter dispatches the instruction (Esc closes); while the turn runs it
+// shows a spinner, then 'applied' or the error, and closes on click.
+const InlineKBar: React.FC<{
+  st: InlineKBarState
+  onSubmit: (instruction: string) => void
+  onClose: () => void
+}> = ({ st, onSubmit, onClose }) => {
+  const [text, setText] = useState('')
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  useEffect(() => inputRef.current?.focus(), [])
+
+  const submit = () => {
+    const t = text.trim()
+    if (!t) return
+    onSubmit(t)
+  }
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      submit()
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      onClose()
+    }
+  }
+
+  return (
+    <div
+      className="absolute z-40 flex items-center gap-2 rounded border border-[var(--accent)] bg-[var(--bg-panel)] shadow-lg px-2 py-1 text-xs no-drag"
+      style={{
+        left: st.left,
+        top: st.top,
+        transform: 'translateY(calc(-100% - 6px))',
+        minWidth: 240,
+      }}
+    >
+      {st.status === 'running' ? (
+        <span className="text-dim animate-pulse">{'working\u2026'}</span>
+      ) : st.status === 'done' || st.status === 'error' ? (
+        <>
+          <span
+            className={
+              st.status === 'done' ? 'text-[#7dcf9e]' : 'text-[#e5735f]'
+            }
+          >
+            {st.msg ?? (st.status === 'done' ? 'applied' : 'failed')}
+          </span>
+          <button
+            className="no-drag px-2 py-0.5 rounded bg-[#1e1f22] text-dim hover:text-primary"
+            onClick={onClose}
+          >
+            close
+          </button>
+        </>
+      ) : (
+        <>
+          <input
+            ref={inputRef}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder={'edit selection\u2026'}
+            className="flex-1 min-w-0 bg-transparent text-primary outline-none"
+          />
+          <button
+            className="no-drag px-2 py-0.5 rounded bg-[#1e1f22] text-dim hover:text-primary"
+            title="Esc"
+            onClick={onClose}
+          >
+            esc
+          </button>
+        </>
+      )}
+    </div>
+  )
+}
+
 const TabEditor: React.FC<{
   projectId: string
   tab: Tab
@@ -470,8 +567,10 @@ const TabEditor: React.FC<{
 }> = ({ projectId, tab, active }) => {
   const { setDirty, save, reload, keepMine, openFile, consumeReveal } =
     useTabs()
+  const { generateCommit } = useAgent()
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
   const loadedContentRef = useRef<string | undefined>(undefined)
   const dirtyRef = useRef(false)
   const openedRef = useRef(false)
@@ -491,6 +590,98 @@ const TabEditor: React.FC<{
   const minimapCompartmentRef = useRef(new Compartment())
   const fontPx = useFontSize()
   const fontCompartmentRef = useRef(new Compartment())
+  const [inlineK, setInlineK] = useState<InlineKBarState | null>(null)
+  const inlineKRef = useRef<InlineKBarState | null>(null)
+  inlineKRef.current = inlineK
+  const generateCommitRef = useRef(generateCommit)
+  generateCommitRef.current = generateCommit
+
+  // openInlineK arms the bar over the current selection. When the selection
+  // is empty it no-ops with a brief status-bar hint instead.
+  const openInlineK = useCallback(() => {
+    if (inlineKRef.current?.status === 'running') return
+    const view = viewRef.current
+    const wrap = wrapRef.current
+    if (!view || !wrap) return
+    const sel = view.state.selection.main
+    if (sel.empty) {
+      window.dispatchEvent(
+        new CustomEvent('aide:status-hint', {
+          detail: 'select code to edit',
+        }),
+      )
+      return
+    }
+    const head = view.coordsAtPos(sel.head)
+    if (!head) return
+    const r = wrap.getBoundingClientRect()
+    const left = Math.max(
+      8,
+      Math.min(head.left - r.left, r.width - 280),
+    )
+    setInlineK({
+      from: sel.from,
+      to: sel.to,
+      left,
+      top: head.top - r.top,
+      status: 'input',
+    })
+  }, [])
+
+  // runInlineK composes the reduced-context prompt (rel path + line range +
+  // selected text + instruction) and drives one synchronous ACP turn; the
+  // agent's fs-write flow (with diff-review cards) handles applying it, and
+  // the fs.change reconcile path reloads the file in place.
+  const runInlineK = useCallback(
+    (instruction: string) => {
+      const st = inlineKRef.current
+      const view = viewRef.current
+      if (!st || !view) return
+      const startLine = view.state.doc.lineAt(st.from).number
+      const endLine = view.state.doc.lineAt(st.to).number
+      const selected = view.state.sliceDoc(st.from, st.to)
+      const prompt =
+        `file: ${tab.path} (lines ${startLine}-${endLine})\n` +
+        '```\n' +
+        selected +
+        '\n```\n' +
+        `rewrite the above implementing: ${instruction}\n` +
+        'Reply with the full new file if you can — or your diff if not possible (ACP agent protocol).'
+      setInlineK((s) => (s ? { ...s, status: 'running' } : s))
+      generateCommitRef
+        .current(projectId, prompt)
+        .then(() =>
+          setInlineK((s) =>
+            s ? { ...s, status: 'done', msg: 'applied' } : s,
+          ),
+        )
+        .catch((e: unknown) => {
+          const why = e instanceof Error ? e.message : String(e)
+          const msg =
+            why === 'timeout' ? 'timeout — check agent panel' : why.slice(0, 120)
+          setInlineK((s) => (s ? { ...s, status: 'error', msg } : s))
+        })
+    },
+    [projectId, tab.path],
+  )
+
+  // Cmd-K (or the File → AI: Edit Selection menu item) opens the bar; Escape
+  // inside it just closes.
+  useEffect(() => {
+    if (!active) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'k' || !(e.metaKey || e.ctrlKey)) return
+      e.preventDefault()
+      openInlineK()
+    }
+    const onMenu = () => openInlineK()
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('aide:ai-edit', onMenu)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('aide:ai-edit', onMenu)
+    }
+  }, [active, openInlineK])
 
   useEffect(() => {
     if (!hostRef.current) return
@@ -662,7 +853,7 @@ const TabEditor: React.FC<{
   }, [active])
 
   return (
-    <div
+    <div ref={wrapRef}
       className="absolute inset-0 flex flex-col"
       style={{ display: active ? 'flex' : 'none' }}
     >
@@ -697,6 +888,13 @@ const TabEditor: React.FC<{
         <div
           ref={hostRef}
           className="relative flex-1 min-h-0 overflow-hidden"
+        />
+      )}
+      {inlineK && (
+        <InlineKBar
+          st={inlineK}
+          onSubmit={runInlineK}
+          onClose={() => setInlineK(null)}
         />
       )}
     </div>

@@ -33,6 +33,14 @@ func setApplicationMenu(app *application.App) {
 	closeTab.OnClick(func(*application.Context) {
 		app.Event.Emit("aide:close-tab")
 	})
+	// AI: Edit Selection routes ⌘K into the editor as an event; the frontend
+	// decides whether a non-diff tab with a non-empty selection is active and
+	// otherwise surfaces a status-bar hint.
+	aiEdit := fileMenu.Add("AI: Edit Selection \u2318K")
+	aiEdit.SetAccelerator("CmdOrCtrl+K")
+	aiEdit.OnClick(func(*application.Context) {
+		app.Event.Emit("aide:ai-edit")
+	})
 	// NOTE: no CloseWindow role here — the native performClose: item would
 	// also claim ⌘W and race with Close Tab. The window itself stays closable
 	// via the traffic lights / ⌘⇧W.

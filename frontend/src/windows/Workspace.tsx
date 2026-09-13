@@ -340,9 +340,15 @@ const WorkspaceInner: React.FC = () => {
       if (Date.now() - (window.__aideWAt ?? 0) < 100) return
       requestCloseActive(closeActive)
     })
+    // File → AI: Edit Selection (main.go) relays into the editor surface via
+    // a window event; TabEditor decides whether a selection exists.
+    const offAi = Events.On('aide:ai-edit', () => {
+      window.dispatchEvent(new Event('aide:ai-edit'))
+    })
     window.addEventListener('keydown', onKey, true)
     return () => {
       window.removeEventListener('keydown', onKey, true)
+      offAi()
       off()
     }
   }, [])
