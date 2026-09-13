@@ -55,7 +55,9 @@ jobs:
         run: go version && node --version && npm --version
 
       - name: Install wails3
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Cache Go build artifacts
         uses: actions/cache@v4
