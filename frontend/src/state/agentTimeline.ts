@@ -162,7 +162,7 @@ export const reduceTranscript = (
         toolCallId: e.toolId,
         title: e.text,
         kind: 'other',
-        status: e.status ?? 'completed',
+        status: e.status || 'completed',
         content: '',
       })
       continue

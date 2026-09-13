@@ -405,6 +405,14 @@ const AgentPanel: React.FC = () => {
         </button>
       </div>
 
+      {/* Session-op errors surface in BOTH tabs (a Clear transcript refusal
+          must be visible while the Chat tab is open too). */}
+      {histErr && (
+        <div className="shrink-0 bg-[#5a1d1d] text-[#ff9999] border border-[#ff6b6b]/30 rounded-lg px-3 py-1 mb-2">
+          {histErr}
+        </div>
+      )}
+
       {tab === 'chat' ? (
         <div className="flex-1 min-h-0 relative">
           <div ref={listRef} onScroll={onScroll} className="absolute inset-0 overflow-y-auto py-1">
@@ -432,11 +440,6 @@ const AgentPanel: React.FC = () => {
         </div>
       ) : (
         <div className="flex-1 min-h-0 overflow-y-auto">
-          {histErr && (
-            <div className="bg-[#5a1d1d] text-[#ff9999] border border-[#ff6b6b]/30 rounded-lg px-3 py-1 mb-2">
-              {histErr}
-            </div>
-          )}
           {projSessions.length === 0 && <div className="px-1 py-2 text-dim">No sessions yet</div>}
           {projSessions.map((s) => (
             <SessionRow

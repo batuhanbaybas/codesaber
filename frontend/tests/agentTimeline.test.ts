@@ -51,6 +51,15 @@ describe('agent timeline reducer', () => {
     expect(s.timeline.filter((i) => i.type === 'permission')).toHaveLength(0)
   })
 
+  it('falls back to completed for a persisted empty-string tool status', () => {
+    const entries = [
+      { role: 'agent', text: 'Reading', kind: 'tool', toolId: 't1', status: '' },
+    ]
+    const s = reduceTranscript(emptyAgentState(), entries)
+    const tools = s.timeline.map((i) => i as ToolItem)
+    expect(tools[0].status).toBe('completed')
+  })
+
   it('passes persisted tool status through in reduceTranscript', () => {
     const entries = [
       { role: 'agent', text: 'Reading', kind: 'tool', toolId: 't1', status: 'in_progress' },
