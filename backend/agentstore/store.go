@@ -102,8 +102,10 @@ func (s *Store) open() error {
 	}
 	if err := db.Ping(); err != nil {
 		db.Close()
-		// fall back to in-memory so the app keeps working (history won't persist)
-		db, err = sql.Open("sqlite", "file:agent_mem?mode=memory&cache=shared")
+		// fall back to in-memory so the app keeps working (history won't persist).
+		// Process-unique name avoids clashing with other in-process stores;
+		// cache=shared keeps the single connection pool able to see it.
+		db, err = sql.Open("sqlite", fmt.Sprintf("file:agent_mem_%d?mode=memory&cache=shared", os.Getpid()))
 		if err != nil {
 			return fmt.Errorf("agentstore: open in-memory fallback: %w", err)
 		}
@@ -159,6 +161,23 @@ func validKind(k string) bool {
 	return false
 }
 
+// tsLayout is a fixed-width RFC3339 variant: fractional seconds always use
+// exactly 9 digits, so stored strings sort lexicographically in chronological
+// order (RFC3339Nano's variable-width fractions do not).
+const tsLayout = "2006-01-02T15:04:05.000000000Z07:00"
+
+// parseWhen parses a stored timestamp tolerantly: our fixed-width layout
+// first, then the legacy RFC3339Nano/RFC3339 formats.
+func parseWhen(s string) (time.Time, error) {
+	if t, err := time.Parse(tsLayout, s); err == nil {
+		return t, nil
+	}
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t, nil
+	}
+	return time.Parse(time.RFC3339, s)
+}
+
 // Append persists one entry. For tool entries with a ToolID it upserts by
 // (session, tool_id); otherwise it appends with the next seq. When zero it is
 // stamped with time.Now(). If the session row does not exist it is created
@@ -197,7 +216,7 @@ func (s *Store) appendEntryLocked(sessionID, projectID string, e Entry) error {
 		if projectID == "" {
 			return fmt.Errorf("agentstore: session %q does not exist and no projectID given", sessionID)
 		}
-		now := e.When.Format(time.RFC3339Nano)
+		now := e.When.Format(tsLayout)
 		if _, err := tx.Exec(
 			`INSERT INTO sessions (id, project_id, title, created, updated) VALUES (?, ?, '', ?, ?)`,
 			sessionID, projectID, now, now,
@@ -213,7 +232,7 @@ func (s *Store) appendEntryLocked(sessionID, projectID string, e Entry) error {
 			 VALUES (?, COALESCE((SELECT MAX(seq)+1 FROM entries WHERE session_id = ?), 0), ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(session_id, tool_id) WHERE tool_id <> ''
 			 DO UPDATE SET status = excluded.status, text = excluded.text, "when" = excluded."when"`,
-			sessionID, sessionID, e.Role, e.Kind, e.ToolID, e.Status, e.Text, e.When.Format(time.RFC3339Nano),
+			sessionID, sessionID, e.Role, e.Kind, e.ToolID, e.Status, e.Text, e.When.Format(tsLayout),
 		); err != nil {
 			return fmt.Errorf("agentstore: upsert tool entry: %w", err)
 		}
@@ -221,14 +240,14 @@ func (s *Store) appendEntryLocked(sessionID, projectID string, e Entry) error {
 		if _, err := tx.Exec(
 			`INSERT INTO entries (session_id, seq, role, kind, tool_id, status, text, "when")
 			 VALUES (?, COALESCE((SELECT MAX(seq)+1 FROM entries WHERE session_id = ?), 0), ?, ?, ?, '', ?, ?)`,
-			sessionID, sessionID, e.Role, e.Kind, e.ToolID, e.Text, e.When.Format(time.RFC3339Nano),
+			sessionID, sessionID, e.Role, e.Kind, e.ToolID, e.Text, e.When.Format(tsLayout),
 		); err != nil {
 			return fmt.Errorf("agentstore: insert entry: %w", err)
 		}
 	}
 
 	// touch updated + auto-title
-	now := e.When.Format(time.RFC3339Nano)
+	now := e.When.Format(tsLayout)
 	if e.Kind == KindText && e.Role == "user" {
 		if _, err := tx.Exec(
 			`UPDATE sessions SET updated = ?, title = CASE WHEN title = '' THEN ? ELSE title END WHERE id = ?`,
@@ -245,15 +264,16 @@ func (s *Store) appendEntryLocked(sessionID, projectID string, e Entry) error {
 }
 
 // deriveTitle extracts a session title from the first user prompt: first
-// non-empty line, capped at 60 chars.
+// non-empty line, capped at 60 runes (rune-safe for multi-byte text).
 func deriveTitle(text string) string {
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		if len(line) > 60 {
-			line = strings.TrimSpace(line[:60])
+		r := []rune(line)
+		if len(r) > 60 {
+			line = strings.TrimSpace(string(r[:60]))
 		}
 		return line
 	}
@@ -280,7 +300,9 @@ func (s *Store) Read(sessionID string) ([]Entry, error) {
 		if err := rows.Scan(&e.Role, &e.Kind, &e.ToolID, &e.Status, &e.Text, &when); err != nil {
 			return nil, fmt.Errorf("agentstore: scan: %w", err)
 		}
-		if t, err := time.Parse(time.RFC3339Nano, when); err == nil {
+		// Unparseable timestamps leave When as the zero time; acceptable for
+		// corrupt/legacy legacy rows — we keep the entry rather than fail.
+		if t, err := parseWhen(when); err == nil {
 			e.When = t
 		}
 		out = append(out, e)
@@ -297,7 +319,7 @@ func (s *Store) ListSessions(projectID string) ([]SessionMeta, error) {
 	defer s.mu.Unlock()
 	rows, err := s.db.Query(
 		`SELECT s.id, s.project_id, s.title, s.created, s.updated,
-		        (SELECT COUNT(*) FROM entries e WHERE e.session_id = s.id) AS n
+		        (SELECT COUNT(*) FROM entries e WHERE e.session_id = s.id AND e.kind <> 'chunk') AS n
 		 FROM sessions s WHERE s.project_id = ? ORDER BY s.updated DESC`,
 		projectID,
 	)
@@ -367,20 +389,25 @@ func (s *Store) DeleteSession(sessionID string) error {
 	return nil
 }
 
-// ClearAll deletes every session for a project.
+// ClearAll deletes every session for a project atomically.
 func (s *Store) ClearAll(projectID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("agentstore: begin: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(
 		`DELETE FROM entries WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ?)`,
 		projectID,
 	); err != nil {
 		return fmt.Errorf("agentstore: clear entries: %w", err)
 	}
-	if _, err := s.db.Exec(`DELETE FROM sessions WHERE project_id = ?`, projectID); err != nil {
+	if _, err := tx.Exec(`DELETE FROM sessions WHERE project_id = ?`, projectID); err != nil {
 		return fmt.Errorf("agentstore: clear sessions: %w", err)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // importLegacyLocked imports legacy flat <projectID>.jsonl transcripts as one
