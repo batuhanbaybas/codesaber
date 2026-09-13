@@ -54,6 +54,12 @@ jobs:
       - name: Toolchain info
         run: go version && node --version && npm --version
 
+      - name: Install Linux CGO deps
+        if: matrix.goos == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+
       - name: Install wails3
         run: |
           go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
@@ -80,12 +86,6 @@ jobs:
       # depends. Ubuntu 24.04 ships both as -dev packages; if a future runner
       # image drops libwebkitgtk-6.0-dev, fall back to libwebkit2gtk-4.1-dev
       # (GTK3 stack) and adjust nfpm depends to match.
-      - name: Install Linux CGO deps
-        if: matrix.goos == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
-
       - name: Package (darwin)
         if: matrix.goos == 'darwin'
         run: |
