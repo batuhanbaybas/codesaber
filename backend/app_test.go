@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"aide/backend/git"
-	"aide/backend/lsp"
-	"aide/backend/settings"
+	"codesaber/backend/git"
+	"codesaber/backend/lsp"
+	"codesaber/backend/settings"
 )
 
 type fakeSink struct {
@@ -922,7 +922,7 @@ func TestTermLifecycle(t *testing.T) {
 		t.Fatalf("termID = %q, want %q", termID, proj.ID+"|0")
 	}
 
-	marker := "aide-facade-42"
+	marker := "codesaber-facade-42"
 	if err := app.TermInput(termID, []byte("echo "+marker+"\r")); err != nil {
 		t.Fatal(err)
 	}

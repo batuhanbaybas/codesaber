@@ -109,8 +109,8 @@ const CommandPalette: React.FC = () => {
     })
     cmds.push({
       id: 'about',
-      name: 'About aide',
-      hint: `aide ${APP_VERSION}`,
+      name: 'About codesaber',
+      hint: `codesaber ${APP_VERSION}`,
       run: () => close(),
     })
     return cmds

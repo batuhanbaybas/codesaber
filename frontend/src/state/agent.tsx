@@ -6,9 +6,9 @@ import React, {
   useState,
 } from 'react'
 import { Events } from '@wailsio/runtime'
-import * as App from '../../bindings/aide/backend/app'
-import type { Info as HarnessInfo } from '../../bindings/aide/backend/acp/models'
-import type { Entry } from '../../bindings/aide/backend/agentstore/models'
+import * as App from '../../bindings/codesaber/backend/app'
+import type { Info as HarnessInfo } from '../../bindings/codesaber/backend/acp/models'
+import type { Entry } from '../../bindings/codesaber/backend/agentstore/models'
 import { useProjects } from './projects'
 
 export type AgentState = 'idle' | 'thinking' | 'harness-down' | 'no-harness'

@@ -76,8 +76,8 @@ func TestStartSessionHandshake(t *testing.T) {
 		t.Errorf("initialize.protocolVersion = %v, want 1", initParams["protocolVersion"])
 	}
 	clientInfo, _ := initParams["clientInfo"].(map[string]any)
-	if clientInfo == nil || clientInfo["name"] != "aide" || clientInfo["version"] != "0.1.0" {
-		t.Errorf("initialize.clientInfo = %#v, want {name:aide,version:0.1.0}", initParams["clientInfo"])
+	if clientInfo == nil || clientInfo["name"] != "codesaber" || clientInfo["version"] != "0.1.0" {
+		t.Errorf("initialize.clientInfo = %#v, want {name:codesaber,version:0.1.0}", initParams["clientInfo"])
 	}
 	caps, _ := initParams["clientCapabilities"].(map[string]any)
 	fs, _ := caps["fs"].(map[string]any)

@@ -6,8 +6,8 @@ import (
 	"log"
 	"time"
 
-	"aide/backend"
-	"aide/backend/adapter"
+	"codesaber/backend"
+	"codesaber/backend/adapter"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -22,7 +22,7 @@ var assets embed.FS
 
 // setApplicationMenu installs the macOS application menu with the default
 // app/edit/window roles plus File → Close Tab (⌘W), which forwards to the
-// frontend as the 'aide:close-tab' event.
+// frontend as the 'codesaber:close-tab' event.
 func setApplicationMenu(app *application.App) {
 	menu := application.NewMenu()
 	menu.AddRole(application.AppMenu)
@@ -31,7 +31,7 @@ func setApplicationMenu(app *application.App) {
 	closeTab := fileMenu.Add("Close Tab")
 	closeTab.SetAccelerator("CmdOrCtrl+W")
 	closeTab.OnClick(func(*application.Context) {
-		app.Event.Emit("aide:close-tab")
+		app.Event.Emit("codesaber:close-tab")
 	})
 	// AI: Edit Selection routes ⌘K into the editor as an event; the frontend
 	// decides whether a non-diff tab with a non-empty selection is active and
@@ -39,7 +39,7 @@ func setApplicationMenu(app *application.App) {
 	aiEdit := fileMenu.Add("AI: Edit Selection \u2318K")
 	aiEdit.SetAccelerator("CmdOrCtrl+K")
 	aiEdit.OnClick(func(*application.Context) {
-		app.Event.Emit("aide:ai-edit")
+		app.Event.Emit("codesaber:ai-edit")
 	})
 	// NOTE: no CloseWindow role here — the native performClose: item would
 	// also claim ⌘W and race with Close Tab. The window itself stays closable
@@ -69,8 +69,8 @@ func main() {
 	// 'Bind' is a list of Go struct instances. The frontend has access to the methods of these instances.
 	// 'Mac' options tailor the application when running an macOS.
 	app := application.New(application.Options{
-		Name:        "aide",
-		Description: "aide IDE",
+		Name:        "codesaber",
+		Description: "codesaber IDE",
 		Services: []application.Service{
 			application.NewService(&GreetService{}),
 			application.NewService(backend.New(adapter.NewBridge())),
@@ -87,7 +87,7 @@ func main() {
 	// to ⌘W: a native menu accelerator intercepts the chord before the
 	// WKWebView sees it, so webview-level preventDefault alone cannot be
 	// relied on to keep Cmd+W from reaching system handlers. The menu item
-	// simply emits 'aide:close-tab'; the frontend decides whether the webview
+	// simply emits 'codesaber:close-tab'; the frontend decides whether the webview
 	// handler or this fallback actually closes the tab (see Workspace.tsx).
 	setApplicationMenu(app)
 
@@ -95,7 +95,7 @@ func main() {
 	// on demand from the backend RPC EnsureWorkspaceWindow (adapter/window.go).
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:    adapter.WelcomeWindowName,
-		Title:   "aide",
+		Title:   "codesaber",
 		Width:   800,
 		Height:  520,
 		Mac: application.MacWindow{

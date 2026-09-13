@@ -7,8 +7,8 @@ import React, {
   useState,
 } from 'react'
 import { Events } from '@wailsio/runtime'
-import * as App from '../../bindings/aide/backend/app'
-import type { DiffPatch, Status } from '../../bindings/aide/backend/git/models'
+import * as App from '../../bindings/codesaber/backend/app'
+import type { DiffPatch, Status } from '../../bindings/codesaber/backend/git/models'
 import { useProjects } from './projects'
 
 export const diffKey = (projectId: string, path: string, staged: boolean) =>

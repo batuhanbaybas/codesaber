@@ -15,7 +15,7 @@
 - ONE ACP connection per project, one harness process per project. Restart harness on crash, transcript survives.
 - MVP permission model: agent `session/request_permission` → surface as inline buttons (Allow once / Always / Reject). Reply `outcome = allow|reject` with `optionId` if the harness sent options; otherwise plain allow/reject.
 - fs/write_text_file accepted ONLY after permission grant; fs/read_text_file always allowed (agent needs to read code to work).
-- Chat persistence: append JSONL transcript file per project at `os.UserConfigDir()/aide/chats/<projectId>.jsonl`; restored in Agent tab on window open.
+- Chat persistence: append JSONL transcript file per project at `os.UserConfigDir()/codesaber/chats/<projectId>.jsonl`; restored in Agent tab on window open.
 
 **Tech Stack:** stdlib (encoding/json, os/exec, bufio), no extra deps. Frontend: existing providers pattern.
 
@@ -82,7 +82,7 @@ Concretely in-code: `Frame{ID any, Method string, Params any, Result any, Error 
 **Files:** `backend/acp/connection.go`, `backend/acp/connection_test.go`, `backend/acp/harness.go`.
 
 - [ ] **Step 1: failing test:** fake agent binary: a small Go program under `backend/acp/testdata` (`fakeagent.go`) that on stdin `initialize` → responds `{protocolVersion, agentCapabilities{LoadSession:true}}` etc; connection test: Spawn + SendRequest wait response + receive notify (`session/update` echo on prompt) and fs/read_text_file request from agent → client handler returns content.
-- [ ] **Step 2: Connection** struct: cmd pipeline, two reader goroutines (in/out), request map[uint64]chan; Req(method, params) synchronously returns result/err; Notify out; OnNotify(handler); client request handler dispatched to a `Handlers` struct: `ReadTextFile(path)`, `WriteTextFile(path, content)`. Spawn: harness config `{Name, Command []string}` per defaults documented at top of file (profiles: opencode `opencode acp`, claude `claude-code-acp` adapter command name "claude-acp" — trim to accurate post-verification), overridable in app config `aide.json`.
+- [ ] **Step 2: Connection** struct: cmd pipeline, two reader goroutines (in/out), request map[uint64]chan; Req(method, params) synchronously returns result/err; Notify out; OnNotify(handler); client request handler dispatched to a `Handlers` struct: `ReadTextFile(path)`, `WriteTextFile(path, content)`. Spawn: harness config `{Name, Command []string}` per defaults documented at top of file (profiles: opencode `opencode acp`, claude `claude-code-acp` adapter command name "claude-acp" — trim to accurate post-verification), overridable in app config `codesaber.json`.
 - [ ] Implement, `feat(acp): stdio connection + spawn profiles`.
 
 ### Task 4: Session client + transcript store
@@ -90,7 +90,7 @@ Concretely in-code: `Frame{ID any, Method string, Params any, Result any, Error 
 **Files:** `backend/acp/client.go`, `backend/agentstore/store.go` (+test).
 
 - [ ] SessionClient: wraps connection; `Initialize(clientInfo, agentInfo)`, `NewSession(projectRoot)→ID`, `Prompt(text)` → response {stopReason}; handles `session/update` notifications by calling a registered `OnUpdate(Update)`.
-- [ ] backend/agentstore: `Append(projectID, entry)`, `Read(projectID) []Entry` — JSONL w/ Entry{Role,Content,Entities,Time}; mutex; file at os.UserConfigDir()/aide/chats/<id>.jsonl. TDD both.
+- [ ] backend/agentstore: `Append(projectID, entry)`, `Read(projectID) []Entry` — JSONL w/ Entry{Role,Content,Entities,Time}; mutex; file at os.UserConfigDir()/codesaber/chats/<id>.jsonl. TDD both.
 - [ ] Commit: `feat(acp): session client + transcript store`.
 
 ### Task 5: Facade + frontend chat

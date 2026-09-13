@@ -29,7 +29,7 @@ frontend/src/state/terminal.tsx           # TerminalProvider per project: open t
 
 **Files:** `backend/terminal/terminal.go`, `backend/terminal/terminal_test.go`.
 
-- [ ] **Step 1: Failing test** — spawn `/bin/sh -i` (POSIX, stable) through the engine: write `echo aide-pty-test-<n>\r`, read output until marker seen; termination test: Stop() then exit event. Requires no tty from test itself — creack/pty creates one. darwin arm64 works locally.
+- [ ] **Step 1: Failing test** — spawn `/bin/sh -i` (POSIX, stable) through the engine: write `echo codesaber-pty-test-<n>\r`, read output until marker seen; termination test: Stop() then exit event. Requires no tty from test itself — creack/pty creates one. darwin arm64 works locally.
 
 ```go
 func TestSessionEchoRoundtrip(t *testing.T) {

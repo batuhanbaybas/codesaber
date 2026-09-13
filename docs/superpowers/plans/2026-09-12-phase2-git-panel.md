@@ -177,7 +177,7 @@ func TestCommit(t *testing.T) {
 	// dirty init.txt first:
 	os.WriteFile(filepath.Join(dir, "init.txt"), []byte("three"), 0o644)
 	if err := e.Stage([]string{"init.txt"}); err != nil { t.Fatal(err) }
-	if err := e.Commit("bump", "aide <aide@local>"); err != nil {
+	if err := e.Commit("bump", "codesaber <codesaber@local>"); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
 	st, _ := e.Status()

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
-import * as App from '../../bindings/aide/backend/app'
-import type { Match, Result } from '../../bindings/aide/backend/search/models'
+import * as App from '../../bindings/codesaber/backend/app'
+import type { Match, Result } from '../../bindings/codesaber/backend/search/models'
 import { useProjects } from '../state/projects'
 import { useTabs } from '../state/tabs'
 import { langChip } from '../lib/filetype'
@@ -129,7 +129,7 @@ const SearchPanel: React.FC = () => {
     if (!activeId || loadedProjectRef.current === activeId) return
     loadedProjectRef.current = activeId
     try {
-      const raw = localStorage.getItem(`aide.search.${activeId}`)
+      const raw = localStorage.getItem(`codesaber.search.${activeId}`)
       const prefs = raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
       setInclude(typeof prefs.include === 'string' ? prefs.include : '')
       setExclude(typeof prefs.exclude === 'string' ? prefs.exclude : '')
@@ -144,7 +144,7 @@ const SearchPanel: React.FC = () => {
   useEffect(() => {
     if (!activeId || loadedProjectRef.current !== activeId) return
     localStorage.setItem(
-      `aide.search.${activeId}`,
+      `codesaber.search.${activeId}`,
       JSON.stringify({ include, exclude, caseSensitive }),
     )
   }, [activeId, include, exclude, caseSensitive])
@@ -156,8 +156,8 @@ const SearchPanel: React.FC = () => {
       inputRef.current?.focus()
       inputRef.current?.select()
     }
-    window.addEventListener('aide:search-focus', onFocus)
-    return () => window.removeEventListener('aide:search-focus', onFocus)
+    window.addEventListener('codesaber:search-focus', onFocus)
+    return () => window.removeEventListener('codesaber:search-focus', onFocus)
   }, [])
 
   // Debounced live search (250ms); a newer query supersedes the older one.

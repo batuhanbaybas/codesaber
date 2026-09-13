@@ -48,7 +48,7 @@ import { useTabs, type Tab } from '../state/tabs'
 import DiffViewer from './DiffViewer'
 import MdPreview from './MdPreview'
 import { mdPreviewOn, subscribeMdPreview } from '../lib/mdpreview'
-import * as App from '../../bindings/aide/backend/app'
+import * as App from '../../bindings/codesaber/backend/app'
 import { useAgent } from '../state/agent'
 import * as LSP from '../lsp'
 
@@ -455,7 +455,7 @@ const publishCursor = (state: EditorState): void => {
     const pos = state.selection.main.head
     const line = state.doc.lineAt(pos)
     window.dispatchEvent(
-      new CustomEvent('aide:cursor', {
+      new CustomEvent('codesaber:cursor', {
         detail: { line: line.number, col: pos - line.from + 1 },
       }),
     )
@@ -606,7 +606,7 @@ const TabEditor: React.FC<{
     const sel = view.state.selection.main
     if (sel.empty) {
       window.dispatchEvent(
-        new CustomEvent('aide:status-hint', {
+        new CustomEvent('codesaber:status-hint', {
           detail: 'select code to edit',
         }),
       )
@@ -676,10 +676,10 @@ const TabEditor: React.FC<{
     }
     const onMenu = () => openInlineK()
     window.addEventListener('keydown', onKey)
-    window.addEventListener('aide:ai-edit', onMenu)
+    window.addEventListener('codesaber:ai-edit', onMenu)
     return () => {
       window.removeEventListener('keydown', onKey)
-      window.removeEventListener('aide:ai-edit', onMenu)
+      window.removeEventListener('codesaber:ai-edit', onMenu)
     }
   }, [active, openInlineK])
 

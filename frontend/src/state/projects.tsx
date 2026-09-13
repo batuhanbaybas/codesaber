@@ -7,8 +7,8 @@ import React, {
   useState,
 } from 'react'
 import { Events } from '@wailsio/runtime'
-import * as App from '../../bindings/aide/backend/app'
-import type { Project } from '../../bindings/aide/backend/project/models'
+import * as App from '../../bindings/codesaber/backend/app'
+import type { Project } from '../../bindings/codesaber/backend/project/models'
 
 interface ProjectsContextValue {
   projects: Project[]

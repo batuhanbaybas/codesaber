@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"aide/backend/acp"
-	"aide/backend/agentstore"
+	"codesaber/backend/acp"
+	"codesaber/backend/agentstore"
 )
 
 // fakePrompter is a controllable acpPrompter: Prompt blocks until released

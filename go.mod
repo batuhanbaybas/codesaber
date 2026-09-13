@@ -1,4 +1,4 @@
-module aide
+module codesaber
 
 go 1.25.0
 

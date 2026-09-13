@@ -4,14 +4,14 @@
 // bracketColors/perfHud keep a localStorage cache as a fallback so the very
 // first paint (before the RPC resolves) matches the last session.
 import { useSyncExternalStore } from 'react'
-import * as App from '../../bindings/aide/backend/app'
-import type { Model } from '../../bindings/aide/backend/settings/models'
+import * as App from '../../bindings/codesaber/backend/app'
+import type { Model } from '../../bindings/codesaber/backend/settings/models'
 
 export type Settings = Model
 
-const KEY = 'aide.bracketColors'
-const HUD_KEY = 'aide.perfHud'
-export const SETTINGS_EVENT = 'aide:settings'
+const KEY = 'codesaber.bracketColors'
+const HUD_KEY = 'codesaber.perfHud'
+export const SETTINGS_EVENT = 'codesaber:settings'
 
 export const DEFAULTS: Settings = {
   bracketColors: true,

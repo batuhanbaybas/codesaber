@@ -7,7 +7,7 @@ import React, {
   useState,
 } from 'react'
 import { Events } from '@wailsio/runtime'
-import * as App from '../../bindings/aide/backend/app'
+import * as App from '../../bindings/codesaber/backend/app'
 import { getSettings } from '../lib/settings'
 import { useProjects } from './projects'
 

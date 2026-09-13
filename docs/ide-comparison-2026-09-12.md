@@ -1,14 +1,14 @@
-# aide vs the Field — Cursor / Trae / Zed Comparison
+# codesaber vs the Field — Cursor / Trae / Zed Comparison
 
-Date: 2026-09-12 (after Phase 7 night build) · Status snapshot: `bin/aide` v0.2.4
+Date: 2026-09-12 (after Phase 7 night build) · Status snapshot: `bin/codesaber` v0.2.4
 
-## What aide has today (one line each)
+## What codesaber has today (one line each)
 
 Multi-project workspace · editable multi-language editor w/ minimal LSP (gopls) · Git panel (status/stage/commit/branch/diff/history/push) · ACP agent harnesses (opencode/Claude/Gemini, streaming chat, diff-review cards w/ accept-reject) · real PTY terminals · ⌘P files · ⌘T symbols (tree-sitter WASM index) · ⌘⇧F workspace search (case/globs/regex) · perf HUD · low resource profile.
 
 ## Comparison
 
-| Capability | aide | Cursor | Trae | Zed |
+| Capability | codesaber | Cursor | Trae | Zed |
 |---|---|---|---|---|
 | AI harness freedom (ACP, swap w/o losing IDE) | ✅ first-class | ❌ Cursor-only | ❌ Trae-only | △ (_extensions ecosystem growing through ACP from Zed's own incubation) |
 | Per-project agent sessions + diff review cards | ✅ | ✅ (tab-only, no separate harness) | ✅ | △ (agent panel via ACP; files review similar) |
@@ -29,7 +29,7 @@ Multi-project workspace · editable multi-language editor w/ minimal LSP (gopls)
 
 1. **More languages with full editing support** — at minimum TS Doc-Degree editor LSP (typescript-language-server), Rust (rust-analyzer). The harness-agnostic story sells only if editors stay superb across our polyglot targets.
 2. **DAP debugging** (breakpoints, step, evaluate, callstack) — non-negotiable for a daily driver. Start: delve for Go via DAP adapter.
-3. **Remote development** (SSHFolders-remote or devcontainers per-launch): cursor raiders rely on it; implement at least "open folder over SSH with rcp/LSP buffered handling" — pan P2.
+3. **Remote development** (SSHFolders-remote or devcontainers per-launch): cursor rcodesaberrs rely on it; implement at least "open folder over SSH with rcp/LSP buffered handling" — pan P2.
 4. **Settings UI + sync** (JSON schema editor + theme sync + per-project overrides).
 5. **Hunk-level git staging** and agent-aware commit haven+multi; "stage only lines agent changed" — Cursor doesn't do this well; genuine differentiator.
 6. **AI UX polish to Cursor parity**: prompt history searchable, agent todos/plan view, inline-edit-at-cursor via harness (⌘K inline edits). Inline ⌘K is the single most-missed cursor muscle-memory.

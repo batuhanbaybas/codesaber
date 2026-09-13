@@ -4,12 +4,12 @@ import { useProjects } from '../state/projects'
 import { useLayout } from '../state/layout'
 
 // Collapsible project sections: collapsed project ids are persisted per
-// project id in localStorage under 'aide.projects.expand' so they survive
+// project id in localStorage under 'codesaber.projects.expand' so they survive
 // restarts. Default is expanded; chevron rotates per state.
 
 const readCollapsedMap = (): Record<string, boolean> => {
   try {
-    return JSON.parse(localStorage.getItem('aide.projects.expand') ?? '{}')
+    return JSON.parse(localStorage.getItem('codesaber.projects.expand') ?? '{}')
   } catch {
     return {}
   }
@@ -45,7 +45,7 @@ const Sidebar: React.FC = () => {
       const next = { ...prev, [id]: !prev[id] }
       try {
         localStorage.setItem(
-          'aide.projects.expand',
+          'codesaber.projects.expand',
           JSON.stringify(next),
         )
       } catch {

@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"aide/backend/acp"
-	"aide/backend/agentstore"
+	"codesaber/backend/acp"
+	"codesaber/backend/agentstore"
 )
 
 // ACP agent event names (backend→UI).

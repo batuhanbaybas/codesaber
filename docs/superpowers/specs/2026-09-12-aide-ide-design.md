@@ -1,4 +1,4 @@
-# aide — Personal IDE Design
+# codesaber — Personal IDE Design
 
 Date: 2026-09-12
 Status: Approved design (pre-implementation spec)
@@ -34,7 +34,7 @@ backend/
 
 - Every engine: own goroutine(s), `defer recover()` at engine boundary, supervisor restarts on panic and emits `engine.status` so UI panels degrade gracefully.
 - Per-project engine instances, keyed by project ID. No global mutable state.
-- Session/recents state: `~/Library/Application Support/aide/`.
+- Session/recents state: `~/Library/Application Support/codesaber/`.
 
 ### Windows
 

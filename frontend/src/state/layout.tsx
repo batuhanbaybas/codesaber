@@ -36,7 +36,7 @@ const defaults: LayoutUI = {
   terminalHeight: SIZE_LIMITS.terminalHeight.def,
 }
 
-const storageKey = `aide.layout:${role}`
+const storageKey = `codesaber.layout:${role}`
 
 const load = (): LayoutUI => {
   try {

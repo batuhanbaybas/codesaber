@@ -8,7 +8,7 @@ import React, {
 import { useProjects } from '../state/projects'
 import { useTabs } from '../state/tabs'
 import { useSymbols, type SymHit } from '../state/symbols'
-import * as App from '../../bindings/aide/backend/app'
+import * as App from '../../bindings/codesaber/backend/app'
 
 interface FileItem {
   projectId: string
@@ -113,15 +113,15 @@ const QuickOpen: React.FC = () => {
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
 
-  // 'aide:quickopen' (activity rail) opens the palette too. Same priority
+  // 'codesaber:quickopen' (activity rail) opens the palette too. Same priority
   // rule as Mod-P: never stack on top of the command palette.
   useEffect(() => {
     const onOpen = () => {
       if (document.querySelector('[data-command-palette]')) return
       open('files')
     }
-    window.addEventListener('aide:quickopen', onOpen)
-    return () => window.removeEventListener('aide:quickopen', onOpen)
+    window.addEventListener('codesaber:quickopen', onOpen)
+    return () => window.removeEventListener('codesaber:quickopen', onOpen)
   }, [open])
 
   useEffect(() => {

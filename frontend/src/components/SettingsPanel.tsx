@@ -174,7 +174,7 @@ const SettingsPanel: React.FC = () => {
         <div className="py-2 text-[11px] flex flex-col gap-1">
           <div className="flex justify-between gap-6">
             <span className="text-dim">Version</span>
-            <span className="text-primary">aide {APP_VERSION}</span>
+            <span className="text-primary">codesaber {APP_VERSION}</span>
           </div>
           <div className="flex justify-between gap-6">
             <span className="text-dim">Runtime</span>

@@ -8,7 +8,7 @@ Date: 2026-09-12 · branch `feat/phase1-editor-core`
 | Open Folder → project in sidebar with tree | ✅ |
 | Second project adds second section | ✅ |
 | Syntax highlighting Go + TS (colors need polish — legacy Go mode vs theme) | ✅ (noted) |
-| ⌘S saves; no `.aide-tmp` leftovers | ✅ |
+| ⌘S saves; no `.codesaber-tmp` leftovers | ✅ |
 | External change: dirty tab shows "File changed on disk" banner | ✅ |
 | Remove project from sidebar | ✅ |
 | Relaunch → recents with last-used | ✅ |

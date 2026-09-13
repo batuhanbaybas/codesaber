@@ -42,7 +42,7 @@ func (s *Service) Dirty(path, current string) bool {
 // it as the last-saved content for path. The temp file is removed on any
 // error path.
 func (s *Service) Save(path, content string) error {
-	tmp := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".aide-tmp")
+	tmp := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".codesaber-tmp")
 	defer func() {
 		if _, statErr := os.Stat(tmp); statErr == nil {
 			os.Remove(tmp)

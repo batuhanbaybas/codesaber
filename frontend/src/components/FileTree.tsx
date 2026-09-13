@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import * as App from '../../bindings/aide/backend/app'
-import type { Entry } from '../../bindings/aide/backend/models'
+import * as App from '../../bindings/codesaber/backend/app'
+import type { Entry } from '../../bindings/codesaber/backend/models'
 import { useProjects } from '../state/projects'
 import { useTabs } from '../state/tabs'
 import FileIcon from './FileIcon'

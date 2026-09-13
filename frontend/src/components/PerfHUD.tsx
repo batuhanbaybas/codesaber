@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
-import * as App from '../../bindings/aide/backend/app'
-import { Health } from '../../bindings/aide/backend/models'
+import * as App from '../../bindings/codesaber/backend/app'
+import { Health } from '../../bindings/codesaber/backend/models'
 import { onSettingsChange, perfHudEnabled } from '../lib/settings'
 
 const Row: React.FC<{ label: string; value: string }> = ({ label, value }) => (
@@ -52,7 +52,7 @@ const PerfHUD: React.FC = () => {
       className="fixed top-8 right-3 z-60 rounded-lg bg-black/85 backdrop-blur border border-[#3a3d45] text-mono text-[11px] leading-5 px-3 py-2 min-w-[190px] shadow-lg select-none"
       data-testid="perf-hud"
     >
-      <div className="text-dim mb-1 tracking-wide">aide perf</div>
+      <div className="text-dim mb-1 tracking-wide">codesaber perf</div>
       <Row label="rpc" value={`${sample.rpcMs.toFixed(1)}ms`} />
       <Row label="rss" value={`${(h?.rssMB ?? 0).toFixed(1)}MB`} />
       <Row label="goroutines" value={String(h?.goroutines ?? 0)} />

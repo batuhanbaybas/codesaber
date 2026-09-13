@@ -56,7 +56,7 @@ func TestSessionEchoRoundtrip(t *testing.T) {
 	}
 	defer s.Close()
 	data := s.Data()
-	marker := "aide-pty-9"
+	marker := "codesaber-pty-9"
 	if err := s.Input([]byte("echo " + marker + "\r")); err != nil {
 		t.Fatal(err)
 	}

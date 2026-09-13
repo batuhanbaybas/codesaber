@@ -3,7 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Events } from '@wailsio/runtime'
-import * as App from '../../bindings/aide/backend/app'
+import * as App from '../../bindings/codesaber/backend/app'
 import { b64ToBytes, bytesToB64 } from '../state/terminal'
 import '@xterm/xterm/css/xterm.css'
 

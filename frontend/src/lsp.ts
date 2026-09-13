@@ -1,5 +1,5 @@
-import * as App from '../bindings/aide/backend/app'
-import type { Location, DocumentSymbol, Hover } from '../bindings/aide/backend/lsp/models'
+import * as App from '../bindings/codesaber/backend/app'
+import type { Location, DocumentSymbol, Hover } from '../bindings/codesaber/backend/lsp/models'
 
 // Diagnostic mirrors the backend lsp.Diagnostic payload in "lsp.diag" events.
 export interface Diagnostic {

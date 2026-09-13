@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import * as App from '../../bindings/aide/backend/app'
-import type { Recent } from '../../bindings/aide/backend/project/models'
+import * as App from '../../bindings/codesaber/backend/app'
+import type { Recent } from '../../bindings/codesaber/backend/project/models'
 
 const nameOf = (root: string) => root.slice(root.lastIndexOf('/') + 1) || root
 
@@ -68,7 +68,7 @@ const Welcome: React.FC = () => {
       {/* Left rail */}
       <div className="flex w-56 shrink-0 flex-col justify-center px-8 border-r border-panel bg-panel">
         <div className="mb-8">
-          <div className="text-2xl font-semibold tracking-tight">aide</div>
+          <div className="text-2xl font-semibold tracking-tight">codesaber</div>
           <div className="mt-1 text-xs text-dim">AI-native code editor</div>
         </div>
         <button

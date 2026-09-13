@@ -9,7 +9,7 @@ import (
 )
 
 // ClientInfo is the implementation identity sent in initialize params.
-const ClientInfo = `{"name":"aide","version":"0.1.0"}`
+const ClientInfo = `{"name":"codesaber","version":"0.1.0"}`
 
 // Session is one ACP conversation lifecycle: spawn -> initialize ->
 // session/new -> prompt turns with streamed updates.

@@ -32,7 +32,7 @@ func OpenWelcomeWindow() {
 	}
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             WelcomeWindowName,
-		Title:            "aide",
+		Title:            "codesaber",
 		Width:            800,
 		Height:           520,
 		Mac:              macOptions(),
@@ -71,7 +71,7 @@ func EnsureWorkspaceWindow() {
 	}
 	w := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             WorkspaceWindowName,
-		Title:            "aide",
+		Title:            "codesaber",
 		Width:            1000,
 		Height:           618,
 		Mac:              macOptions(),

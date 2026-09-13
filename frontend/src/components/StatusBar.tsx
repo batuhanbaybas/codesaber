@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Events } from '@wailsio/runtime'
-import * as App from '../../bindings/aide/backend/app'
+import * as App from '../../bindings/codesaber/backend/app'
 import { useLayout } from '../state/layout'
 import { useProjects } from '../state/projects'
 import { useGit } from '../state/git'
@@ -172,7 +172,7 @@ const languageLabel = (path: string | null | undefined): string => {
   return extToLabel[ext] ?? (ext ? ext.toUpperCase() : '')
 }
 
-// CursorPos tracks the caret of the active editor via "aide:cursor" window
+// CursorPos tracks the caret of the active editor via "codesaber:cursor" window
 // events (published by the CM6 update listener, debounced 100ms). Switching
 // tabs resets to the dim placeholder until the new editor reports.
 interface CursorPos {
@@ -197,8 +197,8 @@ const CursorPosition: React.FC<{ resetKey: string | null }> = ({ resetKey }) => 
       if (!d || typeof d.line !== 'number' || typeof d.col !== 'number') return
       setPos(d)
     }
-    window.addEventListener('aide:cursor', onCursor)
-    return () => window.removeEventListener('aide:cursor', onCursor)
+    window.addEventListener('codesaber:cursor', onCursor)
+    return () => window.removeEventListener('codesaber:cursor', onCursor)
   }, [])
 
   return (
@@ -212,7 +212,7 @@ const Divider: React.FC = () => (
   <span className="w-px h-3.5 bg-[#3a3c3f]" aria-hidden="true" />
 )
 
-// StatusHint flashes a brief transient message via "aide:status-hint" window
+// StatusHint flashes a brief transient message via "codesaber:status-hint" window
 // events (e.g. ⌘K pressed with no selection). Auto-clears after 2.5s.
 const StatusHint: React.FC = () => {
   const [text, setText] = useState('')
@@ -224,9 +224,9 @@ const StatusHint: React.FC = () => {
       window.clearTimeout(timerRef.current)
       timerRef.current = window.setTimeout(() => setText(''), 2500)
     }
-    window.addEventListener('aide:status-hint', onHint)
+    window.addEventListener('codesaber:status-hint', onHint)
     return () => {
-      window.removeEventListener('aide:status-hint', onHint)
+      window.removeEventListener('codesaber:status-hint', onHint)
       window.clearTimeout(timerRef.current)
     }
   }, [])
@@ -298,7 +298,7 @@ const StatusBar: React.FC = () => {
         <span>UTF-8</span>
         {lang && <span>{lang}</span>}
         <Divider />
-        <span>aide {APP_VERSION}</span>
+        <span>codesaber {APP_VERSION}</span>
         <button
           onClick={() => toggle('terminal')}
           className="no-drag w-5 h-4 rounded flex items-center justify-center text-dim hover:text-primary hover:bg-[#373940]"

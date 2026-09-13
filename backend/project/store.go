@@ -21,13 +21,13 @@ func NewStore(path string) *Store { return &Store{path: path} }
 
 func DefaultStorePath() string {
 	if base, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(base, "aide", "recents.json")
+		return filepath.Join(base, "codesaber", "recents.json")
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(os.TempDir(), "aide", "recents.json")
+		return filepath.Join(os.TempDir(), "codesaber", "recents.json")
 	}
-	return filepath.Join(home, ".config", "aide", "recents.json")
+	return filepath.Join(home, ".config", "codesaber", "recents.json")
 }
 
 func (s *Store) load() []Recent {

@@ -15,7 +15,7 @@ import (
 // resolved via exec.LookPath("gopls").
 var OptionalBinaryPath string
 
-// defaultBinaryPath is the binary Options wiring in aide.json (Phase 6)
+// defaultBinaryPath is the binary Options wiring in codesaber.json (Phase 6)
 // will make configurable. gopls must be on PATH (or in GOPATH/bin) otherwise.
 const defaultBinaryPath = "gopls"
 

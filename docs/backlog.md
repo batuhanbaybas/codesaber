@@ -1,4 +1,4 @@
-# aide IDE — Feature Backlog
+# codesaber IDE — Feature Backlog
 
 Last updated: 2026-09-12 · Plans live in `docs/superpowers/plans/`
 Legend: ✅ done · 🚧 in progress · ⬜ todo · 📌 deferred (was requested, scheduled later)
@@ -70,7 +70,7 @@ Legend: ✅ done · 🚧 in progress · ⬜ todo · 📌 deferred (was requested
 - ✅ Titlebar: breadcrumb (project › branch › file), ⌘P search capsule, panel toggle icons
 - ✅ File-type icons in tree + editor tabs; dock tab icons w/ badge
 - ✅ Minimap column; readable dark syntax theme
-- ✅ Status bar: Ln/Col cursor, diag counters (● errors/▲ warnings), Spaces 2, UTF-8, language label, aide v0.2.4
+- ✅ Status bar: Ln/Col cursor, diag counters (● errors/▲ warnings), Spaces 2, UTF-8, language label, codesaber v0.2.4
 - 📌 Pending from spec: light "Milk" theme, tree-sitter search/index, welcome-screen refinements, error surfacing for stale recents
 ## Phase 7 — Night build (2026-09-12, next-five recommendations)
 

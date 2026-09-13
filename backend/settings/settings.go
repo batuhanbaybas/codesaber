@@ -1,5 +1,5 @@
 // Package settings persists global app preferences as JSON at
-// <user-config-dir>/aide/settings.json. It is intentionally tiny: one Model,
+// <user-config-dir>/codesaber/settings.json. It is intentionally tiny: one Model,
 // Load/Save with an atomic tmp+rename write, and Sanitize for input
 // validation at the RPC boundary.
 package settings
@@ -36,17 +36,17 @@ type Store struct{ path string }
 // NewStore returns a Store persisting to path.
 func NewStore(path string) *Store { return &Store{path: path} }
 
-// DefaultPath returns <user-config-dir>/aide/settings.json, falling back to
-// ~/.config/aide/settings.json (then the temp dir) when UserConfigDir fails.
+// DefaultPath returns <user-config-dir>/codesaber/settings.json, falling back to
+// ~/.config/codesaber/settings.json (then the temp dir) when UserConfigDir fails.
 func DefaultPath() string {
 	if base, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(base, "aide", "settings.json")
+		return filepath.Join(base, "codesaber", "settings.json")
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(os.TempDir(), "aide", "settings.json")
+		return filepath.Join(os.TempDir(), "codesaber", "settings.json")
 	}
-	return filepath.Join(home, ".config", "aide", "settings.json")
+	return filepath.Join(home, ".config", "codesaber", "settings.json")
 }
 
 // Load reads the settings file; a missing or corrupt file yields Default.

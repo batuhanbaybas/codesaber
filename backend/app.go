@@ -14,16 +14,16 @@ import (
 	"sync"
 	"time"
 
-	"aide/backend/adapter"
-	"aide/backend/agentstore"
-	"aide/backend/editor"
-	"aide/backend/fswatch"
-	"aide/backend/git"
-	"aide/backend/lsp"
-	"aide/backend/project"
-	"aide/backend/search"
-	"aide/backend/settings"
-	"aide/backend/terminal"
+	"codesaber/backend/adapter"
+	"codesaber/backend/agentstore"
+	"codesaber/backend/editor"
+	"codesaber/backend/fswatch"
+	"codesaber/backend/git"
+	"codesaber/backend/lsp"
+	"codesaber/backend/project"
+	"codesaber/backend/search"
+	"codesaber/backend/settings"
+	"codesaber/backend/terminal"
 )
 
 // maxTreeDepth limits ListTree recursion (root children = depth 1).
@@ -556,13 +556,13 @@ func (a *App) GitUnstageHunks(projectID, path string, hunkIdx []int) error {
 	return nil
 }
 
-// GitCommit commits staged changes with the fixed "aide <aide@local>" identity.
+// GitCommit commits staged changes with the fixed "codesaber <codesaber@local>" identity.
 func (a *App) GitCommit(projectID, message string) error {
 	e, err := a.gitEngine(projectID)
 	if err != nil {
 		return err
 	}
-	return e.Commit(message, "aide <aide@local>")
+	return e.Commit(message, "codesaber <codesaber@local>")
 }
 
 // GitBranches lists local branches (refs/heads, sorted, short names).

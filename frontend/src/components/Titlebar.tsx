@@ -85,7 +85,7 @@ const Titlebar: React.FC = () => {
     ? tabsState.open.find((t) => t.path === tabsState.active)
     : undefined
 
-  const openQuickOpen = () => window.dispatchEvent(new Event('aide:quickopen'))
+  const openQuickOpen = () => window.dispatchEvent(new Event('codesaber:quickopen'))
 
   return (
     <div
@@ -125,7 +125,7 @@ const Titlebar: React.FC = () => {
         ) : (
           <span className="flex items-center gap-1.5 text-dim" title="active project">
             <FolderIcon />
-            aide
+            codesaber
           </span>
         )}
       </div>

@@ -32,7 +32,7 @@ import SettingsPanel from '../components/SettingsPanel'
 
 declare global {
   interface Window {
-    __aideWAt?: number
+    __codesaberWAt?: number
   }
 }
 
@@ -204,7 +204,7 @@ const ActivityRail: React.FC<{
 
   const openDockTab = (tab: 'search' | 'git' | 'settings') => {
     window.dispatchEvent(
-      new CustomEvent('aide:set-dock-tab', { detail: { tab } }),
+      new CustomEvent('codesaber:set-dock-tab', { detail: { tab } }),
     )
     if (!ui.rightDock) onToggle('rightDock')
   }
@@ -303,15 +303,15 @@ const WorkspaceInner: React.FC = () => {
       )
         setDockTab(tab)
     }
-    window.addEventListener('aide:set-dock-tab', onTab)
-    return () => window.removeEventListener('aide:set-dock-tab', onTab)
+    window.addEventListener('codesaber:set-dock-tab', onTab)
+    return () => window.removeEventListener('codesaber:set-dock-tab', onTab)
   }, [])
 
   // ⌘W → close active tab, not window. Two cooperating paths:
   //  1. Webview keydown (below, capture phase): preventDefault + immediately
-  //     close AND stamp window.__aideWAt.
+  //     close AND stamp window.__codesaberWAt.
   //  2. Native File → Close Tab menu accelerator (main.go) emits
-  //     'aide:close-tab'. If the menu interceptor wins (its keyEquivalent is
+  //     'codesaber:close-tab'. If the menu interceptor wins (its keyEquivalent is
   //     matched before the webview on some macOS paths), marker stays stale
   //     and this event closes the tab. If the webview already closed, the
   //     event is skipped via the marker.
@@ -332,18 +332,18 @@ const WorkspaceInner: React.FC = () => {
       if (e.key.toLowerCase() !== 'w') return
       e.preventDefault()
       e.stopPropagation()
-      window.__aideWAt = Date.now()
+      window.__codesaberWAt = Date.now()
       requestCloseActive(closeActive)
     }
-    const off = Events.On('aide:close-tab', () => {
+    const off = Events.On('codesaber:close-tab', () => {
       // marker fresh → webview path already (or is about to) close
-      if (Date.now() - (window.__aideWAt ?? 0) < 100) return
+      if (Date.now() - (window.__codesaberWAt ?? 0) < 100) return
       requestCloseActive(closeActive)
     })
     // File → AI: Edit Selection (main.go) relays into the editor surface via
     // a window event; TabEditor decides whether a selection exists.
-    const offAi = Events.On('aide:ai-edit', () => {
-      window.dispatchEvent(new Event('aide:ai-edit'))
+    const offAi = Events.On('codesaber:ai-edit', () => {
+      window.dispatchEvent(new Event('codesaber:ai-edit'))
     })
     window.addEventListener('keydown', onKey, true)
     return () => {
@@ -367,11 +367,11 @@ const WorkspaceInner: React.FC = () => {
             // Open the dock on the Search tab and focus its input.
             if (!ui.rightDock) toggle('rightDock')
             window.dispatchEvent(
-              new CustomEvent('aide:set-dock-tab', {
+              new CustomEvent('codesaber:set-dock-tab', {
                 detail: { tab: 'search' },
               }),
             )
-            window.dispatchEvent(new Event('aide:search-focus'))
+            window.dispatchEvent(new Event('codesaber:search-focus'))
           } else if (k === 'h') {
             e.preventDefault()
             togglePerfHud()

@@ -29,7 +29,7 @@ type Entry struct {
 }
 
 // Store persists chat transcripts as JSONL under
-// <user-config-dir>/aide/chats/<projectID>.jsonl. Safe for concurrent use.
+// <user-config-dir>/codesaber/chats/<projectID>.jsonl. Safe for concurrent use.
 type Store struct {
 	userConfigDir func() (string, error)
 	userHomeDir   func() (string, error)
@@ -122,7 +122,7 @@ func (s *Store) Clear(projectID string) error {
 	return nil
 }
 
-// path resolves <config|fallback>/aide/chats/<projectID>.jsonl.
+// path resolves <config|fallback>/codesaber/chats/<projectID>.jsonl.
 func (s *Store) path(projectID string) string {
 	base, err := s.userConfigDir()
 	if err != nil {
@@ -132,7 +132,7 @@ func (s *Store) path(projectID string) string {
 			base = os.TempDir()
 		}
 	}
-	return filepath.Join(base, "aide", "chats", sanitize(projectID)+".jsonl")
+	return filepath.Join(base, "codesaber", "chats", sanitize(projectID)+".jsonl")
 }
 
 // sanitize guards against path traversal in project IDs.

@@ -121,13 +121,13 @@ func TestCommitNothingStaged(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.WriteFile(filepath.Join(dir, "init.txt"), []byte("dirty"), 0o644)
-	if err := e.Commit("msg", "aide <aide@local>"); err == nil || err.Error() != "nothing staged" {
+	if err := e.Commit("msg", "codesaber <codesaber@local>"); err == nil || err.Error() != "nothing staged" {
 		t.Fatalf("Commit dirty worktree, empty index: err=%v", err)
 	}
 	if err := e.Stage([]string{"init.txt"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.Commit("staged commit", "aide <aide@local>"); err != nil {
+	if err := e.Commit("staged commit", "codesaber <codesaber@local>"); err != nil {
 		t.Fatalf("Commit with staged change: %v", err)
 	}
 	nodes, err := e.Log(2)
@@ -149,7 +149,7 @@ func TestCommit(t *testing.T) {
 	if err := e.Stage([]string{"init.txt"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.Commit("bump", "aide <aide@local>"); err != nil {
+	if err := e.Commit("bump", "codesaber <codesaber@local>"); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
 	st, _ := e.Status()

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import * as App from '../../bindings/aide/backend/app'
+import * as App from '../../bindings/codesaber/backend/app'
 import { useProjects } from '../state/projects'
 import {
   useAgent,
