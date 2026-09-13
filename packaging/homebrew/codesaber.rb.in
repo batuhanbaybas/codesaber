@@ -1,0 +1,18 @@
+cask "codesaber" do
+  version "${VERSION}"
+  sha256 arm:   "${SHA_DARWIN_ARM64}",
+         intel: "${SHA_DARWIN_AMD64}"
+
+  url "https://github.com/mstrYoda/codesaber/releases/download/v#{version}/CodeSaber-#{version}-darwin-arm64.dmg",
+      verified: "github.com/mstrYoda/codesaber"
+  name "CodeSaber"
+  desc "A lightweight, AI-native IDE built with Wails v3 + Go + React"
+  homepage "https://github.com/mstrYoda/codesaber"
+
+  livecheck do
+    url :homepage
+    strategy :github_latest
+  end
+
+  app "CodeSaber.app"
+end
