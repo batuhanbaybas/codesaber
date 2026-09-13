@@ -15,7 +15,7 @@ export interface Tab {
   dirContent?: string
   dirty: boolean
   staleExternally?: boolean
-  kind?: 'file' | 'diff' | 'md-preview'
+  kind?: 'file' | 'diff' | 'md-preview' | 'image'
   diffStaged?: boolean
   reveal?: { line: number; character: number }
 }
@@ -48,6 +48,11 @@ interface TabsContextValue {
 const TabsContext = createContext<TabsContextValue | null>(null)
 
 const titleOf = (path: string) => path.slice(path.lastIndexOf('/') + 1) || path
+
+// isImagePath reports whether a path looks like a raster image the app can
+// preview inline (PNG/JPG/JPEG/GIF/WebP/BMP/SVG).
+export const isImagePath = (path: string): boolean =>
+  /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(path)
 
 // diffTabPath encodes a diff tab's identity in its key so diff and file tabs
 // can coexist in the strip without colliding on path.
@@ -136,6 +141,7 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
           path,
           title: titleOf(path),
           dirty: false,
+          kind: isImagePath(path) ? 'image' : undefined,
           reveal: opts?.reveal,
         }
         return {
@@ -145,7 +151,9 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
       })
       if (!needFetch) return
       try {
-        const content = await App.ReadFile(path)
+        const content = isImagePath(path)
+          ? await App.ReadFileB64(path)
+          : await App.ReadFile(path)
         setTabsByProject((prev) => {
           const st = prev[projectId]
           if (!st) return prev
@@ -380,12 +388,13 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
         mutateTab(projectId, path, () => ({ staleExternally: true }))
         return
       }
-      App.ReadFile(path)
-        .then((content) => {
-          if (tab) reload(projectId, path, content)
-          if (previewTab) reload(projectId, previewKey, content)
-        })
-        .catch(() => {})
+      const read = isImagePath(path)
+        ? App.ReadFileB64(path)
+        : App.ReadFile(path)
+      read.then((content) => {
+        if (tab) reload(projectId, path, content)
+        if (previewTab) reload(projectId, previewKey, content)
+      }).catch(() => {})
     })
     return () => off()
   }, [close, mutateTab, reload])

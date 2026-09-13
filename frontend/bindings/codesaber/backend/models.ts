@@ -32,3 +32,15 @@ export interface Health {
     "editorBuffers": number;
     "worktreesSize": string;
 }
+
+/**
+ * PasteItem is one entry read from the pasteboard: either a file/folder
+ * reference (dataB64 empty, Source set) or inline image data (screenshots;
+ * Source empty, dataB64 holds the PNG bytes).
+ */
+export interface PasteItem {
+    "name": string;
+    "isDir": boolean;
+    "source": string;
+    "dataB64"?: string;
+}

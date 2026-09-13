@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Events } from '@wailsio/runtime'
 import * as App from '../../bindings/codesaber/backend/app'
 import type { Entry } from '../../bindings/codesaber/backend/models'
+import type { PasteItem } from '../../bindings/codesaber/backend/models'
 import { useProjects } from '../state/projects'
 import { useTabs } from '../state/tabs'
 import FileIcon from './FileIcon'
@@ -29,6 +30,7 @@ interface CtxMenu {
   y: number
   path: string | null
   dir: boolean
+  pasteItems?: PasteItem[] | null
 }
 
 interface PendingDelete {
@@ -256,10 +258,64 @@ const FileTree: React.FC<{ root: string; projectId: string }> = ({
     }
   }, [ctxMenu])
 
-  const openCtxMenu = (e: React.MouseEvent, path: string | null, dir: boolean) => {
+  // ⌘V anywhere in the tree pastes into the active project root.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.metaKey && !e.ctrlKey) return
+      if (e.key.toLowerCase() !== 'v') return
+      // Inputs/textareas own ⌘V for text pasting.
+      const el = document.activeElement
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)
+        return
+      e.preventDefault()
+      App.PasteboardRead()
+        .then((items) => {
+          if (items?.length)
+            doPaste({ x: 0, y: 0, path: null, dir: true, pasteItems: items })
+        })
+        .catch(() => {})
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [root])
+
+  const openCtxMenu = (
+    e: React.MouseEvent,
+    path: string | null,
+    dir: boolean,
+  ) => {
     e.preventDefault()
     e.stopPropagation()
-    setCtxMenu({ x: e.clientX, y: e.clientY, path, dir })
+    // Probe the pasteboard so the Paste item can enable/disable itself;
+    // a failed read just means Paste is greyed out.
+    App.PasteboardRead()
+      .then((items) => {
+        setCtxMenu({ x: e.clientX, y: e.clientY, path, dir, pasteItems: items })
+      })
+      .catch(() => {
+        setCtxMenu({ x: e.clientX, y: e.clientY, path, dir, pasteItems: null })
+      })
+  }
+
+  // pasteTargetOf resolves where a paste should land: the folder itself,
+  // the parent of a file, or the project root for empty-area clicks.
+  const pasteTargetOf = (menu: CtxMenu): string =>
+    menu.path ? (menu.dir ? menu.path : parentOf(menu.path)) : root
+
+  const doPaste = (menu: CtxMenu) => {
+    const items = menu.pasteItems ?? []
+    if (!items.length) return
+    const target = pasteTargetOf(menu)
+    App.PasteInto(target, items)
+      .then(() => refresh())
+      .catch((e) => {
+        window.dispatchEvent(
+          new CustomEvent('codesaber:status-hint', {
+            detail: String(e).slice(0, 120),
+          }),
+        )
+      })
   }
 
   const deleteRow = (path: string) => {
@@ -392,6 +448,30 @@ const FileTree: React.FC<{ root: string; projectId: string }> = ({
             }}
           >
             New Folder
+          </button>
+          <button
+            className={
+              'w-full text-left px-3 py-1.5 hover:bg-[#3b3d42] ' +
+              (ctxMenu.pasteItems?.length
+                ? 'text-primary'
+                : 'text-dim/60 cursor-default')
+            }
+            disabled={!ctxMenu.pasteItems?.length}
+            title={
+              ctxMenu.pasteItems?.length
+                ? `Paste into ${
+                    pasteTargetOf(ctxMenu) === root
+                      ? 'project root'
+                      : pasteTargetOf(ctxMenu).slice(root.length + 1)
+                  }`
+                : 'Nothing pasteable on the clipboard'
+            }
+            onClick={() => {
+              doPaste(ctxMenu)
+              setCtxMenu(null)
+            }}
+          >
+            Paste
           </button>
           {ctxMenu.path && (
             <>

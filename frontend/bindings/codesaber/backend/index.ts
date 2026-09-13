@@ -9,5 +9,6 @@ export {
 export type {
     Entry,
     GitSyncInfo,
-    Health
+    Health,
+    PasteItem
 } from "./models.js";

@@ -62,6 +62,15 @@ interface InlineKBarState {
   msg?: string
 }
 
+// imageMime maps an image file extension to its data-URL MIME subtype.
+const imageMime = (path: string): string => {
+  const name = path.slice(path.lastIndexOf('/') + 1).toLowerCase()
+  if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'jpeg'
+  if (name.endsWith('.svg')) return 'svg+xml'
+  const m = name.match(/\.(png|gif|webp|bmp)$/)
+  return m ? m[1] : 'png'
+}
+
 const languageFor = (path: string): Extension => {
   const name = path.slice(path.lastIndexOf('/') + 1).toLowerCase()
   if (name.endsWith('.go')) return StreamLanguage.define(go)
@@ -901,6 +910,32 @@ const MdPreviewTab: React.FC<{ tab: Tab; active: boolean }> = ({
   </div>
 )
 
+// ImageTab renders raster images (png/jpg/gif/webp/bmp/svg) as a centered
+// preview instead of dumping bytes into the editor. dirContent holds the
+// base64 payload fetched by TabsProvider.
+const ImageTab: React.FC<{ tab: Tab; active: boolean }> = ({
+  tab,
+  active,
+}) => (
+  <div
+    className="absolute inset-0 flex flex-col"
+    style={{ display: active ? 'flex' : 'none' }}
+  >
+    <div className="flex-1 min-h-0 flex items-center justify-center overflow-auto p-6">
+      {tab.dirContent ? (
+        <img
+          src={`data:image/${imageMime(tab.path)};base64,${tab.dirContent}`}
+          alt={tab.title}
+          className="max-w-full max-h-full object-contain"
+          draggable={false}
+        />
+      ) : (
+        <span className="text-dim text-xs">Loading image…</span>
+      )}
+    </div>
+  </div>
+)
+
 const Editor: React.FC = () => {
   const { activeId } = useProjects()
   const { tabsByProject, saveError } = useTabs()
@@ -938,6 +973,8 @@ const Editor: React.FC = () => {
               tab={t}
               active={t.path === state.active}
             />
+          ) : t.kind === 'image' ? (
+            <ImageTab key={t.path} tab={t} active={t.path === state.active} />
           ) : (
             <TabEditor
               key={t.path}

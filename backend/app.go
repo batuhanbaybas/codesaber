@@ -5,6 +5,7 @@ package backend
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -418,6 +419,26 @@ func (a *App) ReadFile(path string) (string, error) {
 		return "", fmt.Errorf("read %s: %w", path, err)
 	}
 	return string(data), nil
+}
+
+// ReadFileB64 returns binary file content base64-encoded, for image previews.
+// Refuses files larger than maxFileSize.
+func (a *App) ReadFileB64(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("stat %s: %w", path, err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("%s is a directory", path)
+	}
+	if info.Size() > maxFileSize {
+		return "", fmt.Errorf("file %s is larger than %d bytes", path, maxFileSize)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	return base64.StdEncoding.EncodeToString(data), nil
 }
 
 // SaveFile persists content via editor.Service (atomic write + dirty tracking).

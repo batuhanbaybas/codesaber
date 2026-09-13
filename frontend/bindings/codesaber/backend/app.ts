@@ -370,6 +370,24 @@ export function OpenProject(root: string): $CancellablePromise<project$0.Project
 }
 
 /**
+ * PasteInto writes the items into target directory dir. File/folder items
+ * are copied recursively; image items are written as screenshot-<ts>.png.
+ * Refuses targets outside open project roots.
+ */
+export function PasteInto(dir: string, items: $models.PasteItem[] | null): $CancellablePromise<void> {
+    return $Call.ByID(35969440, dir, items);
+}
+
+/**
+ * PasteboardRead returns the pasteboard contents as pasteable items: copied
+ * files/folders (Source = absolute path) or a screenshot image (DataB64 =
+ * PNG). An empty result means nothing pasteable is on the pasteboard.
+ */
+export function PasteboardRead(): $CancellablePromise<$models.PasteItem[] | null> {
+    return $Call.ByID(3195205198);
+}
+
+/**
  * PickFolder opens a native folder-picker and returns the chosen absolute
  * path, or an empty string if the user cancelled the dialog.
  */
@@ -382,6 +400,14 @@ export function PickFolder(): $CancellablePromise<string> {
  */
 export function ReadFile(path: string): $CancellablePromise<string> {
     return $Call.ByID(1742541433, path);
+}
+
+/**
+ * ReadFileB64 returns binary file content base64-encoded, for image previews.
+ * Refuses files larger than maxFileSize.
+ */
+export function ReadFileB64(path: string): $CancellablePromise<string> {
+    return $Call.ByID(4234968659, path);
 }
 
 /**
