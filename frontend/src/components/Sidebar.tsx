@@ -1,11 +1,58 @@
-import React from 'react'
+import React, { useState } from 'react'
 import FileTree from './FileTree'
 import { useProjects } from '../state/projects'
 import { useLayout } from '../state/layout'
 
+// Collapsible project sections: collapsed project ids are persisted per
+// project id in localStorage under 'aide.projects.expand' so they survive
+// restarts. Default is expanded; chevron rotates per state.
+
+const readCollapsedMap = (): Record<string, boolean> => {
+  try {
+    return JSON.parse(localStorage.getItem('aide.projects.expand') ?? '{}')
+  } catch {
+    return {}
+  }
+}
+
+const Chevron: React.FC<{ expanded: boolean }> = ({ expanded }) => (
+  <svg
+    width="10"
+    height="10"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.4"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={
+      'shrink-0 transition-transform duration-150 ' +
+      (expanded ? 'rotate-90' : 'rotate-0')
+    }
+  >
+    <path d="M9 5l7 7-7 7" />
+  </svg>
+)
+
 const Sidebar: React.FC = () => {
   const { projects, activeId, open, remove, setActive } = useProjects()
   const { ui, toggle } = useLayout()
+  const [collapsedMap, setCollapsedMap] = useState<Record<string, boolean>>(
+    readCollapsedMap,
+  )
+  const toggleCollapsed = (id: string) =>
+    setCollapsedMap((prev) => {
+      const next = { ...prev, [id]: !prev[id] }
+      try {
+        localStorage.setItem(
+          'aide.projects.expand',
+          JSON.stringify(next),
+        )
+      } catch {
+        // quota/private-mode errors: collapse state stays session-only
+      }
+      return next
+    })
 
   return (
     <div
@@ -39,6 +86,18 @@ const Sidebar: React.FC = () => {
               }
               onClick={() => setActive(p.id)}
             >
+              <button
+                className="no-drag flex items-center justify-center w-3 h-3 shrink-0 text-dim hover:text-primary"
+                title={collapsedMap[p.id] ? 'Expand' : 'Collapse'}
+                aria-label={`Toggle file tree for ${p.name}`}
+                aria-expanded={!collapsedMap[p.id]}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  toggleCollapsed(p.id)
+                }}
+              >
+                <Chevron expanded={!collapsedMap[p.id]} />
+              </button>
               <span
                 className={
                   'w-1.5 h-1.5 rounded-full shrink-0 ' +
@@ -65,7 +124,9 @@ const Sidebar: React.FC = () => {
                 &times;
               </button>
             </div>
-            <FileTree root={p.root} projectId={p.id} />
+            {!collapsedMap[p.id] && (
+              <FileTree root={p.root} projectId={p.id} />
+            )}
           </div>
         ))}
         {projects.length === 0 && (
