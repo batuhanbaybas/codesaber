@@ -150,20 +150,23 @@ tasks:
       - task: generate:dotdesktop
       - task: generate:aur
 
+  # Each package cmd resolves a GIT_TAG fallback inline: nfpm silently writes
+  # 0.0.0~rc0 when GIT_TAG is empty, and CI may export GIT_TAG explicitly —
+  # the [ -n ] guard keeps the CI value in that case.
   generate:deb:
     summary: Creates a deb package
     cmds:
-      - wails3 tool package -name "{{.APP_NAME}}" -format deb -config ./build/linux/nfpm/nfpm.yaml -out {{.ROOT_DIR}}/bin
+      - sh -c 'export GIT_TAG="${GIT_TAG:-$(git describe --tags --abbrev=0 2>/dev/null | sed "s/^v//")}"; [ -n "$GIT_TAG" ] || export GIT_TAG=0.1.0; wails3 tool package -name "{{.APP_NAME}}" -format deb -config ./build/linux/nfpm/nfpm.yaml -out {{.ROOT_DIR}}/bin'
 
   generate:rpm:
     summary: Creates a rpm package
     cmds:
-      - wails3 tool package -name "{{.APP_NAME}}" -format rpm -config ./build/linux/nfpm/nfpm.yaml -out {{.ROOT_DIR}}/bin
+      - sh -c 'export GIT_TAG="${GIT_TAG:-$(git describe --tags --abbrev=0 2>/dev/null | sed "s/^v//")}"; [ -n "$GIT_TAG" ] || export GIT_TAG=0.1.0; wails3 tool package -name "{{.APP_NAME}}" -format rpm -config ./build/linux/nfpm/nfpm.yaml -out {{.ROOT_DIR}}/bin'
 
   generate:aur:
     summary: Creates a arch linux packager package
     cmds:
-      - wails3 tool package -name "{{.APP_NAME}}" -format archlinux -config ./build/linux/nfpm/nfpm.yaml -out {{.ROOT_DIR}}/bin
+      - sh -c 'export GIT_TAG="${GIT_TAG:-$(git describe --tags --abbrev=0 2>/dev/null | sed "s/^v//")}"; [ -n "$GIT_TAG" ] || export GIT_TAG=0.1.0; wails3 tool package -name "{{.APP_NAME}}" -format archlinux -config ./build/linux/nfpm/nfpm.yaml -out {{.ROOT_DIR}}/bin'
 
   generate:dotdesktop:
     summary: Generates a `.desktop` file
