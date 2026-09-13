@@ -7,6 +7,24 @@ CodeSaber is a lightweight, AI-native IDE built with **Wails v3 + Go + React + C
 <!-- TODO: hero screenshot here -->
 ![CodeSaber hero](docs/screenshots/screenshot-1789307667.png)
 
+## 📦 Install
+
+Grab a build from the [releases page](https://github.com/mstrYoda/codesaber/releases).
+
+### macOS
+```
+brew install --cask mstrYoda/tap/codesaber
+```
+Prefer a direct download? Grab the `.dmg` for your architecture from the releases page. The app is unsigned, so macOS may warn on first launch — right-click the app and choose **Open** to run it.
+
+### Linux
+Download an artifact from the [releases page](https://github.com/mstrYoda/codesaber/releases):
+
+- **AppImage** (amd64): `chmod +x CodeSaber-*.AppImage && ./CodeSaber-*.AppImage`
+- **Debian/Ubuntu**: `sudo dpkg -i codesaber_*.deb` (fix missing deps with `sudo apt -f install`)
+- **Fedora/RHEL**: `sudo dnf install codesaber_*.rpm`
+- **Tarball**: extract and run the included binary
+
 ## ✨ Features
 
 ### 🗂 Editor Core
