@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react'
 import { useProjects } from '../state/projects'
 import { useTabs } from '../state/tabs'
+import { isMarkdown } from '../lib/mdpreview'
 import FileIcon from './FileIcon'
+import { MdPreviewToggle } from './MdPreview'
 
 const EditorTabs: React.FC = () => {
   const { activeId } = useProjects()
@@ -9,6 +11,7 @@ const EditorTabs: React.FC = () => {
   const state = activeId ? tabsByProject[activeId] : undefined
   const tabs = state?.open ?? []
   const active = state?.active ?? null
+  const activeTab = tabs.find((t) => t.path === active)
   const [ctxMenu, setCtxMenu] = useState<{
     x: number
     y: number
@@ -81,6 +84,9 @@ const EditorTabs: React.FC = () => {
         {'\uFF0B'}
       </button>
       <div className="flex-1" />
+      {activeTab && activeTab.kind !== 'diff' && isMarkdown(activeTab.path) && (
+        <MdPreviewToggle path={activeTab.path} />
+      )}
       {ctxMenu && (
         <div
           className="fixed z-50 min-w-[140px] rounded-md border border-[var(--bg-border)] bg-[var(--bg-panel)] shadow-lg py-1 text-[12px]"

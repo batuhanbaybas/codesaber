@@ -35,6 +35,8 @@ import { Events } from '@wailsio/runtime'
 import { useProjects } from '../state/projects'
 import { useTabs, type Tab } from '../state/tabs'
 import DiffViewer from './DiffViewer'
+import MdPreview from './MdPreview'
+import { mdPreviewOn, subscribeMdPreview } from '../lib/mdpreview'
 import * as App from '../../bindings/aide/backend/app'
 import * as LSP from '../lsp'
 
@@ -449,6 +451,11 @@ const TabEditor: React.FC<{
   onSaveRef.current = save
   onOpenFileRef.current = openFile
   const isGo = tab.path.endsWith('.go')
+  const isMd = /\.(md|markdown)$/i.test(tab.path)
+  const previewOn = useSyncExternalStore(
+    subscribeMdPreview,
+    () => mdPreviewOn(tab.path),
+  )
   const bracketOn = useBracketColors()
   const bracketCompartmentRef = useRef(new Compartment())
 
@@ -637,10 +644,18 @@ const TabEditor: React.FC<{
           </button>
         </div>
       )}
-      <div
-        ref={hostRef}
-        className="relative flex-1 min-h-0 overflow-hidden"
-      />
+      {isMd && previewOn ? (
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <MdPreview
+            content={viewRef.current?.state.doc.toString() ?? tab.dirContent ?? ''}
+          />
+        </div>
+      ) : (
+        <div
+          ref={hostRef}
+          className="relative flex-1 min-h-0 overflow-hidden"
+        />
+      )}
     </div>
   )
 }
