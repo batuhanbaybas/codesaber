@@ -175,7 +175,10 @@ tasks:
       - mkdir -p {{.ROOT_DIR}}/build/linux/appimage
       - wails3 generate .desktop -name "{{.DISPLAY_NAME}}" -exec "{{.EXEC}}" -icon "{{.ICON}}" -outputfile "{{.ROOT_DIR}}/build/linux/{{.APP_NAME}}.desktop" -categories "{{.CATEGORIES}}" -comment "{{.COMMENT}}"
       # wails3 has no StartupWMClass flag, so add it after the Exec line if missing
-      - cmd: "grep -q '^StartupWMClass=' '{{.ROOT_DIR}}/build/linux/{{.APP_NAME}}.desktop' || awk '{print} /^Exec=/{print \"StartupWMClass={{.APP_NAME}}\"}' '{{.ROOT_DIR}}/build/linux/{{.APP_NAME}}.desktop' > '{{.ROOT_DIR}}/build/linux/{{.APP_NAME}}.desktop.tmp' && mv '{{.ROOT_DIR}}/build/linux/{{.APP_NAME}}.desktop.tmp' '{{.ROOT_DIR}}/build/linux/{{.APP_NAME}}.desktop'"
+      - cmd: |
+          if ! grep -q '^StartupWMClass=' '{{.ROOT_DIR}}/build/linux/{{.APP_NAME}}.desktop'; then
+            awk '{print} /^Exec=/{print "StartupWMClass={{.APP_NAME}}"}' '{{.ROOT_DIR}}/build/linux/{{.APP_NAME}}.desktop' > '{{.ROOT_DIR}}/build/linux/{{.APP_NAME}}.desktop.tmp' && mv '{{.ROOT_DIR}}/build/linux/{{.APP_NAME}}.desktop.tmp' '{{.ROOT_DIR}}/build/linux/{{.APP_NAME}}.desktop'
+          fi
     vars:
       APP_NAME: '{{.APP_NAME}}'
       DISPLAY_NAME: 'CodeSaber'
