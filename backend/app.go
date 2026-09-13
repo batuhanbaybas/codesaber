@@ -258,9 +258,13 @@ func (a *App) RemoveProject(id string) error {
 	if err != nil {
 		return err
 	}
+	a.mu.Lock()
 	if err := a.reg.Remove(id); err != nil {
+		a.mu.Unlock()
 		return err
 	}
+	a.buf.RemoveProject(id)
+	a.mu.Unlock()
 	lspErr := a.lspMgr.Remove(id)
 	a.lspMu.Lock()
 	delete(a.lspVersions, id)
