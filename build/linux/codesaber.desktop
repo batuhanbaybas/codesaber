@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=CodeSaber
+Exec=/usr/local/bin/codesaber %u
+StartupWMClass=codesaber
+Icon=codesaber
+Categories=Development;IDE;
+Comment=CodeSaber — a lightweight, AI-native IDE built with Wails v3
+Terminal=false
+Keywords=wails
+Version=1.0
+StartupNotify=false

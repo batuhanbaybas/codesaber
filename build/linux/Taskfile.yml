@@ -150,33 +150,46 @@ tasks:
       - task: generate:dotdesktop
       - task: generate:aur
 
+  # Each package cmd resolves a GIT_TAG fallback inline: nfpm silently writes
+  # 0.0.0~rc0 when GIT_TAG is empty, and CI may export GIT_TAG explicitly —
+  # the [ -n ] guard keeps the CI value in that case.
   generate:deb:
     summary: Creates a deb package
     cmds:
-      - wails3 tool package -name "{{.APP_NAME}}" -format deb -config ./build/linux/nfpm/nfpm.yaml -out {{.ROOT_DIR}}/bin
+      - sh -c 'export GIT_TAG="${GIT_TAG:-$(git describe --tags --abbrev=0 2>/dev/null | sed "s/^v//")}"; [ -n "$GIT_TAG" ] || export GIT_TAG=0.1.0; wails3 tool package -name "{{.APP_NAME}}" -format deb -config ./build/linux/nfpm/nfpm.yaml -out {{.ROOT_DIR}}/bin'
 
   generate:rpm:
     summary: Creates a rpm package
     cmds:
-      - wails3 tool package -name "{{.APP_NAME}}" -format rpm -config ./build/linux/nfpm/nfpm.yaml -out {{.ROOT_DIR}}/bin
+      - sh -c 'export GIT_TAG="${GIT_TAG:-$(git describe --tags --abbrev=0 2>/dev/null | sed "s/^v//")}"; [ -n "$GIT_TAG" ] || export GIT_TAG=0.1.0; wails3 tool package -name "{{.APP_NAME}}" -format rpm -config ./build/linux/nfpm/nfpm.yaml -out {{.ROOT_DIR}}/bin'
 
   generate:aur:
     summary: Creates a arch linux packager package
     cmds:
-      - wails3 tool package -name "{{.APP_NAME}}" -format archlinux -config ./build/linux/nfpm/nfpm.yaml -out {{.ROOT_DIR}}/bin
+      - sh -c 'export GIT_TAG="${GIT_TAG:-$(git describe --tags --abbrev=0 2>/dev/null | sed "s/^v//")}"; [ -n "$GIT_TAG" ] || export GIT_TAG=0.1.0; wails3 tool package -name "{{.APP_NAME}}" -format archlinux -config ./build/linux/nfpm/nfpm.yaml -out {{.ROOT_DIR}}/bin'
 
   generate:dotdesktop:
     summary: Generates a `.desktop` file
     dir: build
     cmds:
       - mkdir -p {{.ROOT_DIR}}/build/linux/appimage
-      - wails3 generate .desktop -name "{{.APP_NAME}}" -exec "{{.EXEC}}" -icon "{{.ICON}}" -outputfile "{{.ROOT_DIR}}/build/linux/{{.APP_NAME}}.desktop" -categories "{{.CATEGORIES}}"
+      - wails3 generate .desktop -name "{{.DISPLAY_NAME}}" -exec "{{.EXEC}}" -icon "{{.ICON}}" -outputfile "{{.ROOT_DIR}}/build/linux/{{.APP_NAME}}.desktop" -categories "{{.CATEGORIES}}" -comment "{{.COMMENT}}"
+      # wails3 has no StartupWMClass flag, so add it after the Exec line if missing
+      - cmd: |
+          if ! grep -q '^StartupWMClass=' '{{.ROOT_DIR}}/build/linux/{{.APP_NAME}}.desktop'; then
+            awk '{print} /^Exec=/{print "StartupWMClass={{.APP_NAME}}"}' '{{.ROOT_DIR}}/build/linux/{{.APP_NAME}}.desktop' > '{{.ROOT_DIR}}/build/linux/{{.APP_NAME}}.desktop.tmp' && mv '{{.ROOT_DIR}}/build/linux/{{.APP_NAME}}.desktop.tmp' '{{.ROOT_DIR}}/build/linux/{{.APP_NAME}}.desktop'
+          fi
     vars:
       APP_NAME: '{{.APP_NAME}}'
-      EXEC: '{{.APP_NAME}}'
+      DISPLAY_NAME: 'CodeSaber'
+      COMMENT: 'CodeSaber — a lightweight, AI-native IDE built with Wails v3'
+      # Absolute path expected by deb/rpm/aur installs (binary at /usr/local/bin).
+      # AppImage caveat: the AppImage entry still points at /usr/local/bin, so a
+      # locally-run AppImage ignores this desktop file unless a wrapper/generator
+      # that rewrites Exec is used.
+      EXEC: '/usr/local/bin/{{.APP_NAME}} %u'
       ICON: '{{.APP_NAME}}'
-      CATEGORIES: 'Development;'
-      OUTPUTFILE: '{{.ROOT_DIR}}/build/linux/{{.APP_NAME}}.desktop'
+      CATEGORIES: 'Development;IDE;'
 
   run:
     cmds:

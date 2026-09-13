@@ -5,11 +5,11 @@
 	"info": {
 		"0000": {
 			"ProductVersion": "0.1.0",
-			"CompanyName": "My Company",
-			"FileDescription": "A codesaber application",
-			"LegalCopyright": "© 2026, My Company",
-			"ProductName": "My Product",
-			"Comments": "This is a comment"
+			"CompanyName": "mstrYoda",
+			"FileDescription": "CodeSaber — a lightweight, AI-native IDE built with Wails v3",
+			"LegalCopyright": "(c) 2026 mstrYoda",
+			"ProductName": "CodeSaber",
+			"Comments": "It's like a lightsaber, but for developers."
 		}
 	}
 }
