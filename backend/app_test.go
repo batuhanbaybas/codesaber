@@ -11,6 +11,7 @@ import (
 
 	"aide/backend/git"
 	"aide/backend/lsp"
+	"aide/backend/settings"
 )
 
 type fakeSink struct {
@@ -902,5 +903,37 @@ func TestGitFacadeAheadBehindFetchPushStats(t *testing.T) {
 	}
 	if got := s["stats.txt"]; got[0] != 3 || got[1] != 0 {
 		t.Fatalf("stats: %+v", got)
+	}
+}
+
+func TestSettingsFacade(t *testing.T) {
+	app, _ := newTestApp(t)
+	app.settings = settings.NewStore(filepath.Join(t.TempDir(), "settings.json"))
+
+	// Get with no file on disk yields defaults.
+	got := app.SettingsGet()
+	if want := settings.Default(); got != want {
+		t.Fatalf("SettingsGet = %+v, want default %+v", got, want)
+	}
+
+	// Put persists (sanitized) and Get reads it back.
+	in := settings.Model{BracketColors: false, Minimap: true, EditorFontSizePx: 25, TerminalShell: "/bin/zsh", AccentColor: "#7c3aed"}
+	if err := app.SettingsPut(in); err != nil {
+		t.Fatalf("SettingsPut: %v", err)
+	}
+	out := app.SettingsGet()
+	if out.BracketColors != false || out.TerminalShell != "/bin/zsh" || out.AccentColor != "#7c3aed" {
+		t.Fatalf("SettingsGet after put = %+v", out)
+	}
+	if out.EditorFontSizePx != 18 {
+		t.Fatalf("font size not clamped: %d, want 18", out.EditorFontSizePx)
+	}
+
+	// Invalid accent color is dropped, not persisted.
+	if err := app.SettingsPut(settings.Model{AccentColor: "purple"}); err != nil {
+		t.Fatalf("SettingsPut garbage accent: %v", err)
+	}
+	if got := app.SettingsGet().AccentColor; got != "" {
+		t.Fatalf("garbage accent persisted: %q", got)
 	}
 }

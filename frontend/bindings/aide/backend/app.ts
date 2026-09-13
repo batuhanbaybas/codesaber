@@ -29,6 +29,9 @@ import * as project$0 from "./project/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as search$0 from "./search/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as settings$0 from "./settings/models.js";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -370,6 +373,25 @@ export function SaveFile(path: string, content: string): $CancellablePromise<voi
  */
 export function SearchText(projectID: string, term: string, regex: boolean, caseSensitive: boolean, include: string, exclude: string): $CancellablePromise<search$0.Result> {
     return $Call.ByID(1393198271, projectID, term, regex, caseSensitive, include, exclude);
+}
+
+/**
+ * SettingsGet returns the persisted global settings (defaults when no file
+ * exists yet).
+ */
+export function SettingsGet(): $CancellablePromise<settings$0.Model> {
+    return $Call.ByID(30338443);
+}
+
+/**
+ * SettingsPut sanitizes and persists the settings document. Invalid values
+ * are corrected (font size clamped, garbage accent color dropped) or kept
+ * with a warning (unknown shell path) — Put never fails on user input, only
+ * on I/O errors. MVP note: no settings.updated broadcast; a single workspace
+ * window is assumed, so cross-window sync is out of scope for now.
+ */
+export function SettingsPut(m: settings$0.Model): $CancellablePromise<void> {
+    return $Call.ByID(2958023258, m);
 }
 
 /**

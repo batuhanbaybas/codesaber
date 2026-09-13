@@ -22,6 +22,7 @@ import (
 	"aide/backend/lsp"
 	"aide/backend/project"
 	"aide/backend/search"
+	"aide/backend/settings"
 	"aide/backend/terminal"
 )
 
@@ -132,6 +133,9 @@ type App struct {
 	// one text search runs per project; a new SearchText cancels the previous.
 	searchMu      sync.Mutex
 	searchCancels map[string]*searchRun
+
+	// settings persists global app preferences (settings.json).
+	settings *settings.Store
 }
 
 // lspState is the dedup key for EventLSPState emissions.
@@ -165,6 +169,7 @@ func NewWith(sink adapter.EventSink, storePath string) *App {
 		lspPendingDiagLatest: map[string][]lsp.Diagnostic{},
 		lastLSPState:         map[string]lspState{},
 		searchCancels:        map[string]*searchRun{},
+		settings:             settings.NewStore(settings.DefaultPath()),
 	}
 	a.lspMgr = lsp.NewManager(a.onLSPDiags)
 	return a
@@ -1039,4 +1044,19 @@ func sidProject(termID string) string {
 		return termID[:i]
 	}
 	return termID
+}
+
+// SettingsGet returns the persisted global settings (defaults when no file
+// exists yet).
+func (a *App) SettingsGet() settings.Model {
+	return a.settings.Load()
+}
+
+// SettingsPut sanitizes and persists the settings document. Invalid values
+// are corrected (font size clamped, garbage accent color dropped) or kept
+// with a warning (unknown shell path) — Put never fails on user input, only
+// on I/O errors. MVP note: no settings.updated broadcast; a single workspace
+// window is assumed, so cross-window sync is out of scope for now.
+func (a *App) SettingsPut(m settings.Model) error {
+	return a.settings.Save(settings.Sanitize(m, nil))
 }
