@@ -13,7 +13,7 @@ Grab a build from the [releases page](https://github.com/mstrYoda/codesaber/rele
 
 ### macOS
 ```
-brew install --cask mstrYoda/tap/codesaber
+brew install mstrYoda/codesaber/codesaber
 ```
 Prefer a direct download? Grab the `.dmg` for your architecture from the releases page. The app is unsigned, so macOS may warn on first launch — right-click the app and choose **Open** to run it.
 
