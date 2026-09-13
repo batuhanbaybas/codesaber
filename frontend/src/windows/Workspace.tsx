@@ -158,8 +158,8 @@ const BranchIcon: Icon = (props) => (
 
 const TerminalIcon: Icon = (props) => (
   <svg {...iconProps} {...props}>
-    <circle cx="12" cy="12" r="9" />
-    <path d="M10 8.5l4 3.5-4 3.5" />
+    <path d="M4 17l6-5-6-5" />
+    <path d="M12 19h8" />
   </svg>
 )
 
@@ -203,6 +203,12 @@ const ActivityRail: React.FC<{
     : 0
 
   const openDockTab = (tab: 'search' | 'git' | 'settings') => {
+    // Re-clicking the rail icon of the tab the dock is already showing
+    // closes the dock instead of keeping it pinned open.
+    if (ui.rightDock && dockTab === tab) {
+      onToggle('rightDock')
+      return
+    }
     window.dispatchEvent(
       new CustomEvent('codesaber:set-dock-tab', { detail: { tab } }),
     )

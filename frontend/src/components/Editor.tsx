@@ -47,7 +47,6 @@ import { useProjects } from '../state/projects'
 import { useTabs, type Tab } from '../state/tabs'
 import DiffViewer from './DiffViewer'
 import MdPreview from './MdPreview'
-import { mdPreviewOn, subscribeMdPreview } from '../lib/mdpreview'
 import * as App from '../../bindings/codesaber/backend/app'
 import { useAgent } from '../state/agent'
 import * as LSP from '../lsp'
@@ -579,11 +578,6 @@ const TabEditor: React.FC<{
   onSaveRef.current = save
   onOpenFileRef.current = openFile
   const isGo = tab.path.endsWith('.go')
-  const isMd = /\.(md|markdown)$/i.test(tab.path)
-  const previewOn = useSyncExternalStore(
-    subscribeMdPreview,
-    () => mdPreviewOn(tab.path),
-  )
   const bracketOn = useBracketColors()
   const bracketCompartmentRef = useRef(new Compartment())
   const minimapOn = useMinimap()
@@ -878,18 +872,10 @@ const TabEditor: React.FC<{
           </button>
         </div>
       )}
-      {isMd && previewOn ? (
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          <MdPreview
-            content={viewRef.current?.state.doc.toString() ?? tab.dirContent ?? ''}
-          />
-        </div>
-      ) : (
-        <div
-          ref={hostRef}
-          className="relative flex-1 min-h-0 overflow-hidden"
-        />
-      )}
+      <div
+        ref={hostRef}
+        className="relative flex-1 min-h-0 overflow-hidden"
+      />
       {inlineK && (
         <InlineKBar
           st={inlineK}
@@ -900,6 +886,20 @@ const TabEditor: React.FC<{
     </div>
   )
 }
+
+const MdPreviewTab: React.FC<{ tab: Tab; active: boolean }> = ({
+  tab,
+  active,
+}) => (
+  <div
+    className="absolute inset-0 flex flex-col"
+    style={{ display: active ? 'flex' : 'none' }}
+  >
+    <div className="flex-1 min-h-0 overflow-y-auto">
+      <MdPreview content={tab.dirContent ?? ''} />
+    </div>
+  </div>
+)
 
 const Editor: React.FC = () => {
   const { activeId } = useProjects()
@@ -929,6 +929,12 @@ const Editor: React.FC = () => {
             <DiffViewer
               key={t.path}
               projectId={activeId}
+              tab={t}
+              active={t.path === state.active}
+            />
+          ) : t.kind === 'md-preview' ? (
+            <MdPreviewTab
+              key={t.path}
               tab={t}
               active={t.path === state.active}
             />

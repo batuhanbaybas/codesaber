@@ -2,7 +2,6 @@ import React from 'react'
 import { useProjects } from '../state/projects'
 import { useTabs } from '../state/tabs'
 import { useGit } from '../state/git'
-import { useLayout } from '../state/layout'
 import { langChip } from '../lib/filetype'
 
 const iconProps = {
@@ -39,44 +38,10 @@ const SearchIcon: React.FC = () => (
   </svg>
 )
 
-const TerminalPromptIcon: React.FC = () => (
-  <svg {...iconProps}>
-    <path d="M4 17l6-5-6-5" />
-    <path d="M12 19h8" />
-  </svg>
-)
-
-const DockRightIcon: React.FC = () => (
-  <svg {...iconProps}>
-    <rect x="3" y="4" width="18" height="16" rx="2" />
-    <path d="M15 4v16" />
-    <rect x="15.75" y="5.75" width="4.5" height="12.5" rx="0.5" fill="currentColor" stroke="none" opacity="0.55" />
-  </svg>
-)
-
-const SidebarLeftIcon: React.FC = () => (
-  <svg {...iconProps}>
-    <rect x="3" y="4" width="18" height="16" rx="2" />
-    <path d="M9 4v16" />
-    <rect x="3.75" y="5.75" width="4.5" height="12.5" rx="0.5" fill="currentColor" stroke="none" opacity="0.55" />
-  </svg>
-)
-
-const panelBtn = (active: boolean) =>
-  'no-drag w-7 h-7 rounded-md flex items-center justify-center text-[13px] ' +
-  (active
-    ? 'text-primary bg-white/10 after:absolute after:left-1.5 after:right-1.5 after:bottom-0 after:h-[2px] after:bg-[var(--accent)] after:rounded-full relative'
-    : 'text-dim hover:text-primary hover:bg-white/8')
-
-const Divider: React.FC = () => (
-  <span className="w-px h-4 bg-[var(--bg-border)] shrink-0" aria-hidden />
-)
-
 const Titlebar: React.FC = () => {
   const { projects, activeId } = useProjects()
   const { tabsByProject } = useTabs()
   const { status } = useGit()
-  const { ui, toggle } = useLayout()
 
   const active = projects.find((p) => p.id === activeId) ?? null
   const branch = (activeId ? status[activeId]?.branch : undefined) ?? active?.branch
@@ -143,39 +108,6 @@ const Titlebar: React.FC = () => {
           <span className="ml-auto shrink-0 px-1.5 h-[16px] rounded bg-white/8 text-[10px] leading-[16px] text-[#9a9da3]">
             ⌘P
           </span>
-        </button>
-      </div>
-
-      {/* Panel toggles: terminal · right dock · sidebar */}
-      <div className="no-drag flex items-center gap-0.5 pr-2 shrink-0">
-        <button
-          className={panelBtn(ui.terminal)}
-          title="Terminal ⌘J"
-          aria-label="Toggle terminal"
-          aria-pressed={ui.terminal}
-          onClick={() => toggle('terminal')}
-        >
-          <TerminalPromptIcon />
-        </button>
-        <Divider />
-        <button
-          className={panelBtn(ui.rightDock)}
-          title="Right dock ⌘D"
-          aria-label="Toggle right dock"
-          aria-pressed={ui.rightDock}
-          onClick={() => toggle('rightDock')}
-        >
-          <DockRightIcon />
-        </button>
-        <Divider />
-        <button
-          className={panelBtn(ui.sidebar)}
-          title="Sidebar ⌘B"
-          aria-label="Toggle files sidebar"
-          aria-pressed={ui.sidebar}
-          onClick={() => toggle('sidebar')}
-        >
-          <SidebarLeftIcon />
         </button>
       </div>
     </div>

@@ -15,7 +15,7 @@ export interface Tab {
   dirContent?: string
   dirty: boolean
   staleExternally?: boolean
-  kind?: 'file' | 'diff'
+  kind?: 'file' | 'diff' | 'md-preview'
   diffStaged?: boolean
   reveal?: { line: number; character: number }
 }
@@ -41,6 +41,8 @@ interface TabsContextValue {
   reload: (projectId: string, path: string, content: string) => void
   keepMine: (projectId: string, path: string) => void
   openDiffTab: (projectId: string, path: string, staged: boolean) => void
+  openMdPreviewTab: (projectId: string, path: string) => void
+  closeMdPreviewTab: (projectId: string, path: string) => void
 }
 
 const TabsContext = createContext<TabsContextValue | null>(null)
@@ -63,6 +65,15 @@ export const parseDiffTabPath = (
   if (colon === -1) return null
   return { path: rest.slice(colon + 1), staged: rest.slice(0, colon) === 's' }
 }
+
+// mdPreviewTabPath encodes a markdown preview tab's identity in its key so
+// preview and source tabs coexist in the strip without colliding on path.
+export const mdPreviewTabPath = (path: string) => `\u25C7:${path}`
+
+// parseMdPreviewTabPath reverses mdPreviewTabPath (prefix \u25C7, then the
+// real workspace-relative path).
+export const parseMdPreviewTabPath = (key: string): string | null =>
+  key.startsWith('\u25C7:') ? key.slice(2) : null
 
 // Window during which an fs.change echo for a path we just saved is ignored.
 const saveEchoWindowMs = 2000
@@ -272,6 +283,72 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
     [],
   )
 
+  // Markdown preview tabs mirror diff tabs: never dirty, open is idempotent
+  // (activates an existing preview tab), content fetched once on creation.
+  const openMdPreviewTab = useCallback(
+    (projectId: string, path: string) => {
+      const key = mdPreviewTabPath(path)
+      const existing = tabsRef.current[projectId]?.open.find(
+        (t) => t.path === key,
+      )
+      const needFetch = !existing || existing.dirContent == null
+      setTabsByProject((prev) => {
+        const st = prev[projectId] ?? { open: [], active: null }
+        if (st.open.some((t) => t.path === key)) {
+          return { ...prev, [projectId]: { ...st, active: key } }
+        }
+        const tab: Tab = {
+          path: key,
+          title: titleOf(path),
+          dirty: false,
+          kind: 'md-preview',
+        }
+        return {
+          ...prev,
+          [projectId]: { open: [...st.open, tab], active: key },
+        }
+      })
+      if (!needFetch) return
+      App.ReadFile(path)
+        .then((content) => {
+          setTabsByProject((prev) => {
+            const st = prev[projectId]
+            if (!st) return prev
+            return {
+              ...prev,
+              [projectId]: {
+                ...st,
+                open: st.open.map((t) =>
+                  t.path === key ? { ...t, dirContent: content } : t,
+                ),
+              },
+            }
+          })
+        })
+        .catch(() => {})
+    },
+    [],
+  )
+
+  // Closing a preview tab returns focus to the source tab when the preview
+  // was active, mirroring how the eye toggle reads as "leave preview".
+  const closeMdPreviewTab = useCallback((projectId: string, path: string) => {
+    const key = mdPreviewTabPath(path)
+    setTabsByProject((prev) => {
+      const st = prev[projectId]
+      if (!st || !st.open.some((t) => t.path === key)) return prev
+      const idx = st.open.findIndex((t) => t.path === key)
+      const open = st.open.filter((t) => t.path !== key)
+      let active = st.active
+      if (active === key) {
+        active = st.open.some((t) => t.path === path)
+          ? path
+          : (open[Math.min(idx, open.length - 1)]?.path ?? null)
+      }
+      return { ...prev, [projectId]: { open, active } }
+    })
+  }, [])
+
   // fs.change reconcile: auto-reload non-dirty tabs, flag dirty tabs; the
   // editor surface renders the banner. remove/rename silently closes
   // non-dirty tabs. Immediately-after-save echoes are ignored so our own
@@ -287,19 +364,27 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
       const tab = tabsRef.current[projectId]?.open.find(
         (t) => t.path === path,
       )
-      if (!tab) return
+      const previewKey = mdPreviewTabPath(path)
+      const previewTab = tabsRef.current[projectId]?.open.find(
+        (t) => t.path === previewKey,
+      )
       if (op === 'remove' || op === 'rename') {
+        if (previewTab) close(projectId, previewKey)
+        if (!tab) return
         if (!tab.dirty) close(projectId, path)
         return
       }
       const savedAt = lastSaveRef.current[`${projectId}\0${path}`]
       if (savedAt && Date.now() - savedAt < saveEchoWindowMs) return
-      if (tab.dirty) {
+      if (tab?.dirty) {
         mutateTab(projectId, path, () => ({ staleExternally: true }))
         return
       }
       App.ReadFile(path)
-        .then((content) => reload(projectId, path, content))
+        .then((content) => {
+          if (tab) reload(projectId, path, content)
+          if (previewTab) reload(projectId, previewKey, content)
+        })
         .catch(() => {})
     })
     return () => off()
@@ -319,6 +404,8 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
         reload,
         keepMine,
         openDiffTab,
+        openMdPreviewTab,
+        closeMdPreviewTab,
       }}
     >
       {children}

@@ -1,11 +1,11 @@
-import React, { useMemo, useSyncExternalStore } from 'react'
+import React, { useMemo } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import { useProjects } from '../state/projects'
 import {
-  mdPreviewOn,
-  subscribeMdPreview,
-  toggleMdPreview,
-} from '../lib/mdpreview'
+  useTabs,
+  mdPreviewTabPath,
+} from '../state/tabs'
 
 // Markdown preview: replaces the CodeMirror surface for .md/.markdown tabs.
 // marked renders HTML which is then sanitized with DOMPurify before the
@@ -41,7 +41,13 @@ const EyeIcon: React.FC<{ open?: boolean }> = ({ open }) => (
 )
 
 export const MdPreviewToggle: React.FC<{ path: string }> = ({ path }) => {
-  const on = useSyncExternalStore(subscribeMdPreview, () => mdPreviewOn(path))
+  const { activeId } = useProjects()
+  const { tabsByProject, openMdPreviewTab, closeMdPreviewTab } = useTabs()
+  const on =
+    !!activeId &&
+    !!tabsByProject[activeId]?.open.some(
+      (t) => t.path === mdPreviewTabPath(path),
+    )
   return (
     <button
       className={
@@ -50,10 +56,14 @@ export const MdPreviewToggle: React.FC<{ path: string }> = ({ path }) => {
           ? 'text-[var(--accent)] hover:text-primary'
           : 'text-dim hover:text-primary')
       }
-      title={on ? 'Source view' : 'Preview Markdown'}
-      aria-label={on ? 'Show markdown source' : 'Show markdown preview'}
+      title={on ? 'Close preview' : 'Preview Markdown'}
+      aria-label={on ? 'Close markdown preview' : 'Show markdown preview'}
       aria-pressed={on}
-      onClick={() => toggleMdPreview(path)}
+      onClick={() => {
+        if (!activeId) return
+        if (on) closeMdPreviewTab(activeId, path)
+        else openMdPreviewTab(activeId, path)
+      }}
     >
       <EyeIcon open={on} />
     </button>
