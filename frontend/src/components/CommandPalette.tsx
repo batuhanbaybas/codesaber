@@ -7,6 +7,7 @@ import React, {
 } from 'react'
 import { useProjects } from '../state/projects'
 import { APP_VERSION } from '../version'
+import { bracketColorsEnabled, toggleBracketColors } from '../lib/settings'
 
 interface Command {
   id: string
@@ -93,6 +94,12 @@ const CommandPalette: React.FC = () => {
         },
       })
     }
+    cmds.push({
+      id: 'toggle-bracket-colors',
+      name: `${bracketColorsEnabled() ? '\u2611' : '\u2610'} Toggle Bracket Colorization`,
+      hint: `Bracket pair colors: ${bracketColorsEnabled() ? 'on' : 'off'} (persisted)`,
+      run: () => toggleBracketColors(),
+    })
     cmds.push({
       id: 'about',
       name: 'About aide',

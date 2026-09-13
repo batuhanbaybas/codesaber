@@ -1,8 +1,10 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useSyncExternalStore } from 'react'
 import {
   EditorState,
   StateEffect,
   StateField,
+  Compartment,
+  RangeSetBuilder,
   type Extension,
 } from '@codemirror/state'
 import {
@@ -12,8 +14,12 @@ import {
   GutterMarker,
   hoverTooltip,
   showTooltip,
+  scrollPastEnd,
   ViewPlugin,
+  Decoration,
+  type DecorationSet,
   type Tooltip,
+  type ViewUpdate,
 } from '@codemirror/view'
 import { basicSetup } from 'codemirror'
 import { StreamLanguage } from '@codemirror/language'
@@ -24,6 +30,7 @@ import { html } from '@codemirror/lang-html'
 import { json } from '@codemirror/lang-json'
 import { go } from '@codemirror/legacy-modes/mode/go'
 import { darkSyntax } from '../lib/syntaxTheme'
+import { bracketColorsEnabled, onSettingsChange } from '../lib/settings'
 import { Events } from '@wailsio/runtime'
 import { useProjects } from '../state/projects'
 import { useTabs, type Tab } from '../state/tabs'
@@ -115,6 +122,89 @@ const theme = EditorView.theme(
   },
   { dark: true },
 )
+
+// useBracketColors subscribes reactively to the persisted bracket
+// colorization preference, so toggle updates reconfigure open views.
+const useBracketColors = (): boolean =>
+  useSyncExternalStore(onSettingsChange, bracketColorsEnabled)
+
+// Bracket pair colorization with zero extra dependencies: a ViewPlugin
+// scans the visible range (±200 lines) with a ()[]{} stack and marks each
+// matched pair with a color by nesting depth (4-color cycle).
+const BRACKET_COLORS = ['#d3739c', '#7aa2f7', '#56d4dd', '#aceebb']
+
+const bracketTheme = EditorView.theme(
+  Object.fromEntries(
+    BRACKET_COLORS.map((c, i) => [
+      `.cm-bracket-c${i}`,
+      { color: `${c} !important` },
+    ]),
+  ),
+)
+
+const bracketDeco = BRACKET_COLORS.map((_, i) =>
+  Decoration.mark({ class: `cm-bracket-c${i}` }),
+)
+
+class BracketNesting {
+  decorations: DecorationSet
+  constructor(view: EditorView) {
+    this.decorations = this.build(view)
+  }
+  update(u: ViewUpdate) {
+    if (u.docChanged || u.viewportChanged || u.geometryChanged) {
+      this.decorations = this.build(u.view)
+    }
+  }
+  build(view: EditorView): DecorationSet {
+    const { state } = view
+    if (!view.visibleRanges.length) return Decoration.none
+    // widen scan to ±200 lines around the viewport so visible brackets
+    // for pairs opening off-screen still get their depth color
+    const firstLine = Math.max(
+      1,
+      state.doc.lineAt(view.visibleRanges[0].from).number - 200,
+    )
+    const lastLine = Math.min(
+      state.doc.lines,
+      state.doc.lineAt(view.visibleRanges[view.visibleRanges.length - 1].to)
+        .number + 200,
+    )
+    const from = state.doc.line(firstLine).from
+    const to = state.doc.line(lastLine).to
+    const text = state.sliceDoc(from, to)
+    const stack: { ch: string; pos: number }[] = []
+    const pairs: { pos: number; depth: number }[] = []
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i]
+      if (ch === '(' || ch === '[' || ch === '{') {
+        stack.push({ ch, pos: i })
+        continue
+      }
+      if (ch === ')' || ch === ']' || ch === '}') {
+        const top = stack[stack.length - 1]
+        if (
+          top &&
+          ((ch === ')' && top.ch === '(') ||
+            (ch === ']' && top.ch === '[') ||
+            (ch === '}' && top.ch === '{'))
+        ) {
+          stack.pop()
+          const depth = stack.length % BRACKET_COLORS.length
+          pairs.push({ pos: from + top.pos, depth }, { pos: from + i, depth })
+        }
+      }
+    }
+    pairs.sort((a, b) => a.pos - b.pos)
+    const builder = new RangeSetBuilder<Decoration>()
+    for (const p of pairs) builder.add(p.pos, p.pos + 1, bracketDeco[p.depth])
+    return builder.finish()
+  }
+}
+
+const bracketColors = ViewPlugin.fromClass(BracketNesting, {
+  decorations: (v) => v.decorations,
+})
 
 const setDiagEffect = StateEffect.define<LSP.Diagnostic[] | null>()
 const activeTipEffect = StateEffect.define<Tooltip | null>()
@@ -359,6 +449,8 @@ const TabEditor: React.FC<{
   onSaveRef.current = save
   onOpenFileRef.current = openFile
   const isGo = tab.path.endsWith('.go')
+  const bracketOn = useBracketColors()
+  const bracketCompartmentRef = useRef(new Compartment())
 
   useEffect(() => {
     if (!hostRef.current) return
@@ -374,6 +466,9 @@ const TabEditor: React.FC<{
           diagsField,
           tipField,
           diagGutter,
+          scrollPastEnd(),
+          bracketCompartmentRef.current.of(bracketOn ? bracketColors : []),
+          bracketTheme,
           basicSetup,
           theme,
           darkSyntax,
@@ -438,6 +533,15 @@ const TabEditor: React.FC<{
     // Recreate per open tab; content sync handled below via loadedContentRef.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab.path, projectId, setDirty])
+
+  // toggle bracket colorization live via reconfigurable compartment
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: bracketCompartmentRef.current.reconfigure(
+        bracketOn ? bracketColors : [],
+      ),
+    })
+  }, [bracketOn])
 
   // didOpen once per tab once content exists (gopls must see full text).
   useEffect(() => {
