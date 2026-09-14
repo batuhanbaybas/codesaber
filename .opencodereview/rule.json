@@ -76,5 +76,5 @@
       "merge_system_rule": true
     }
   ],
-  "exclude": ["frontend/dist/**", "frontend/node_modules/**", "**/dist/assets/**"]
+  "exclude": ["frontend/dist/**", "frontend/node_modules/**", "frontend/dist/**/*.js", "frontend/dist/**/*.css", "dist/assets/**"]
 }
