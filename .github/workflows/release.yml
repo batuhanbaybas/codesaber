@@ -1,0 +1,199 @@
+name: release
+
+# Tag-driven release pipeline:
+#   build    -> platform/arch matrix producing DMG / AppImage / deb / rpm / tarball
+#   release  -> aggregate artifacts into one GitHub Release
+#   homebrew -> render + push the cask to mstrYoda/homebrew-codesaber
+on:
+  push:
+    tags:
+      - "v*"
+  # Manual trigger for dry-runs: only the build jobs run (release/homebrew
+  # are guarded on tag refs), so artifacts can be inspected without publishing.
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Toolchain info
+        run: go version && node --version && npm --version
+
+      - name: Install Linux CGO deps
+        if: matrix.goos == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+
+      - name: Install wails3
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Cache Go build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+            ~/Library/Caches/go-build
+          key: go-${{ matrix.goos }}-${{ matrix.goarch }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-${{ matrix.goos }}-${{ matrix.goarch }}-
+
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: npm-${{ matrix.goos }}-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: npm-${{ matrix.goos }}-
+
+      # Wails linux builds are CGO: WebKitGTK 6.0 + GTK4 per build/linux/nfpm
+      # depends. Ubuntu 24.04 ships both as -dev packages; if a future runner
+      # image drops libwebkitgtk-6.0-dev, fall back to libwebkit2gtk-4.1-dev
+      # (GTK3 stack) and adjust nfpm depends to match.
+      - name: Package (darwin)
+        if: matrix.goos == 'darwin'
+        run: |
+          export PATH="$HOME/go/bin:$PATH"
+          wails3 task darwin:package ARCH=${{ matrix.goarch }}
+          wails3 task darwin:create:dmg
+          VER="${{ github.ref_name }}"
+          VER="${VER#v}"
+          mv bin/codesaber.dmg "CodeSaber-${VER}-darwin-${{ matrix.goarch }}.dmg"
+
+      # GIT_TAG drives the nfpm version (nfpm.yaml: version: ${GIT_TAG});
+      # without it nfpm silently writes 0.0.0~rc0.
+      - name: Package (linux)
+        if: matrix.goos == 'linux'
+        run: |
+          VER="${{ github.ref_name }}"
+          VER="${VER#v}"
+          export GIT_TAG="${VER}"
+          if [ "${{ matrix.goarch }}" = "amd64" ]; then
+            export PATH="$HOME/go/bin:$PATH"
+            wails3 task linux:create:appimage
+          fi
+          export PATH="$HOME/go/bin:$PATH"
+          wails3 task linux:create:deb
+          export PATH="$HOME/go/bin:$PATH"
+          wails3 task linux:create:rpm
+          tar -czf "CodeSaber-${VER}-linux-${{ matrix.goarch }}.tar.gz" -C bin codesaber
+          ls -la bin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            CodeSaber-*-darwin-*.dmg
+            bin/*.AppImage
+            bin/*.appimage
+            bin/*.deb
+            bin/*.rpm
+            CodeSaber-*-linux-*.tar.gz
+          # AppImage is only built on amd64; arm64 jobs still ship deb/rpm/tarball
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: tag
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+
+      - name: List artifacts
+        run: ls -la dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/**
+
+  homebrew:
+    needs: [build, release]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+
+      - name: Render cask
+        env:
+          VER: ${{ needs.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          SHA_DARWIN_ARM64=$(sha256sum "dist/CodeSaber-${VER}-darwin-arm64.dmg" | cut -d' ' -f1)
+          SHA_DARWIN_AMD64=$(sha256sum "dist/CodeSaber-${VER}-darwin-amd64.dmg" | cut -d' ' -f1)
+          export SHA_DARWIN_ARM64 SHA_DARWIN_AMD64 VERSION="${VER}"
+          envsubst < packaging/homebrew/codesaber.rb.in > codesaber.rb
+          cat codesaber.rb
+
+      - uses: actions/checkout@v4
+        with:
+          repository: mstrYoda/homebrew-codesaber
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Push cask to tap
+        run: |
+          set -euo pipefail
+          mkdir -p tap/Casks
+          cp codesaber.rb tap/Casks/codesaber.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/codesaber.rb
+          if git diff --cached --quiet; then
+            echo "cask unchanged; nothing to commit"
+          else
+            git commit -m "codesaber ${{ needs.release.outputs.version }}"
+            git push
+          fi

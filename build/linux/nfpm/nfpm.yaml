@@ -4,9 +4,9 @@
 # The lines below are called `modelines`. See `:help modeline`
 
 name: "codesaber"
-arch: ${GOARCH}
+arch: "${GOARCH}"
 platform: "linux"
-version: ${GIT_TAG}
+version: "${GIT_TAG}"
 section: "default"
 priority: "extra"
 maintainer: "mstrYoda <mstrYoda@users.noreply.github.com>"
