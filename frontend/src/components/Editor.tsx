@@ -42,6 +42,7 @@ import {
   getSettings,
   onSettingsChange,
 } from '../lib/settings'
+import { vimExtension } from '../lib/vim'
 import { Events } from '@wailsio/runtime'
 import { useProjects } from '../state/projects'
 import { useTabs, type Tab } from '../state/tabs'
@@ -168,6 +169,9 @@ const useMinimap = (): boolean =>
 
 const useFontSize = (): number =>
   useSyncExternalStore(onSettingsChange, () => effectiveFontSize(getSettings()))
+
+const useVimMode = (): boolean =>
+  useSyncExternalStore(onSettingsChange, () => !!getSettings().vimMode)
 
 // minimapExt is the always-shaped minimap facet; visibility is toggled by
 // wrapping it in a Compartment.
@@ -591,6 +595,8 @@ const TabEditor: React.FC<{
   const minimapCompartmentRef = useRef(new Compartment())
   const fontPx = useFontSize()
   const fontCompartmentRef = useRef(new Compartment())
+  const vimOn = useVimMode()
+  const vimCompartmentRef = useRef(new Compartment())
   const [inlineK, setInlineK] = useState<InlineKBarState | null>(null)
   const inlineKRef = useRef<InlineKBarState | null>(null)
   inlineKRef.current = inlineK
@@ -702,6 +708,7 @@ const TabEditor: React.FC<{
           basicSetup,
           theme,
           fontCompartmentRef.current.of(fontTheme(fontPx)),
+          vimCompartmentRef.current.of(vimOn ? vimExtension() : []),
           darkSyntax,
           lspTheme,
           minimapCompartmentRef.current.of(minimapOn ? minimapExt : []),
@@ -777,6 +784,15 @@ const TabEditor: React.FC<{
       effects: fontCompartmentRef.current.reconfigure(fontTheme(fontPx)),
     })
   }, [fontPx])
+
+  // toggle vim mode live via its compartment
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: vimCompartmentRef.current.reconfigure(
+        vimOn ? vimExtension() : [],
+      ),
+    })
+  }, [vimOn])
 
   // didOpen once per tab once content exists (gopls must see full text).
   useEffect(() => {
