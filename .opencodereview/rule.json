@@ -1,0 +1,80 @@
+{
+  "rules": [
+    {
+      "path": "backend/git/**",
+      "rule": "CodeSaber Git engine. Runs as a long-lived goroutine with fsnotify (fsnotify/fswatch) driving real-time status. Changes must: keep all git subprocess exec paths race-free and context-cancellable, avoid blocking the UI-facing goroutine on subprocess output, maintain staged/unstage-per-file/per-hunk semantics, and keep upstream sync (ahead/behind) indicators consistent with fetch. Atomic writes only for any state persisted to disk.",
+      "merge_system_rule": true
+    },
+    {
+      "path": "backend/acp/**",
+      "rule": "CodeSaber ACP (Agent Client Protocol) client. This is a protocol implementation over JSON-RPC (codec.go) — any change MUST preserve wire compatibility with the Agent Client Protocol across opencode and Claude Code harnesses. Requirements: every request/response must have a matching codec test when the protocol surface changes; harness restart logic must remain crash-safe (auto-respawn, session survives); session-per-project persistence must not lose on-disk session state; never drop or reorder streaming messages when adding buffering. Flag any context deadline that could kill a long-running agent stream.",
+      "merge_system_rule": true
+    },
+    {
+      "path": "backend/agentstore/**",
+      "rule": "CodeSaber session persistence store backed by pure-Go SQLite (modernc.org/sqlite, no CGO — flag any dependency or code that reintroduces CGO). Multi-session records, chatID locking, rune-safe titles, atomic ClearAll. All store behavior changes MUST include tests (existing files: store_test.go, store_sqlite_test.go, store_sqlite_sessions_test.go, store_memory_fallback_test.go). Preserve the in-memory fallback path and legacy JSONL migration behavior. Titles/timestamps must remain rune-safe (no byte-slicing UTF-8).",
+      "merge_system_rule": true
+    },
+    {
+      "path": "backend/editor/**",
+      "rule": "CodeSaber editor core: per-project tabs, syntax highlighting, minimap, atomic save with external-change reconciliation. Changes must keep saves atomic (temp file + rename), auto-reload/external-change banner behavior intact, and quick-open fuzzy search semantics unchanged. Flag any synchronous blocking I/O on the main event surface.",
+      "merge_system_rule": true
+    },
+    {
+      "path": "backend/lsp/**",
+      "rule": "CodeSaber gopls-powered LSP engine. Provider must remain server-agnostic. Changes to request/response marshaling must keep go-to-definition, hover, diagnostics, and document symbols working; new LSP servers must follow the existing grammar/server config pattern. Flag writing JSON-RPC responses without concurrency-safe locking on the client's request map.",
+      "merge_system_rule": true
+    },
+    {
+      "path": "backend/terminal/**",
+      "rule": "CodeSaper terminal engine: real PTY sessions (creack/pty) per tab, cwd = project root, streaming over an event channel with resize propagation. Changes must not leak PTY file descriptors or goroutines on session close, must preserve resize propagation, and must keep the terminal count tracked for the Perf HUD.",
+      "merge_system_rule": true
+    },
+    {
+      "path": "backend/{fswatch,search,project,settings}/**",
+      "rule": "CodeSaber support engines. fswatch: fsnotify watchers must not leak on project remove and must avoid duplicate event storms. search: glob/tree-sitter indexing must be invalidated on save/filesystem change and stay per-project. project: registry/store changes must preserve per-project state namespaces. settings: persisted settings must remain backward-compatible (unknown/new fields ignored, migration-safe).",
+      "merge_system_rule": true
+    },
+    {
+      "path": "backend/app.go",
+      "rule": "CodeSaber application core — this wires every engine together and is the entry point for Wails-bound methods. Changes must: keep each engine spawned with panic recovery and its restart scaffolding intact, keep per-project state namespacing, avoid blocking calls on bound methods, and keep the Wails service method surface backward-compatible (desktop UI calls them via generated bindings). Any new bound method MUST get a matching generated binding file update (via wails3 generate) and doc comments synced, and a test where feasible.",
+      "merge_system_rule": true
+    },
+    {
+      "path": "backend/*.go",
+      "rule": "CodeSaber backend root files (agent.go, health.go, clipboard.go...). Same engine conventions: goroutine isolation with panic recovery, no unguarded cross-goroutine data races, atomic disk writes, no blocking I/O on bound methods.",
+      "merge_system_rule": true
+    },
+    {
+      "path": "backend/**",
+      "rule": "CodeSaber is a Wails v3 desktop IDE (Go backend + React frontend). Backend conventions that MUST hold for every change: (1) no unguarded cross-goroutine data races — every engine runs in goroutines with panic recovery; (2) no blocking calls on Wails-bound methods (they must return fast so the UI never stalls); (3) atomic file writes for anything persisted; (4) go test coverage for behavior changes where tests exist nearby; (5) dependencies must work in pure-Go — no new CGO dependencies (this repo uses modernc.org/sqlite specifically for that reason). Flag regressions of the engine isolation pattern (crash-safe restart scaffolding).",
+      "merge_system_rule": true
+    },
+    {
+      "path": "frontend/src/state/**",
+      "rule": "CodeSaber frontend state layer (React context/reducers, e.g. agentTimeline.ts). All runtime event-channel mutations must flow through reducers — flag any direct DOM/service mutation outside the reducer pattern. Keep reducer + timeline event handling testable and covered by frontend/tests/ where pattern exists.",
+      "merge_system_rule": true
+    },
+    {
+      "path": "frontend/src/**",
+      "rule": "CodeSaber frontend: React 18 + TypeScript + CodeMirror 6 + xterm.js, talking to a Wails v3 Go backend via generated bindings and runtime event channels. Conventions: (1) no `any` escapes on event-callback payloads — type them; (2) panel resize/layout persistence must keep using ResizeHandle/Sidebar established patterns; (3) keyboard shortcuts (cmd/P, cmd/K, cmd/T, cmd/B, cmd/J, cmd/D, cmd-shift-H) must not be shadowed accidentally; (4) sanitized rendering for any markdown/HTML (marked + dompurify pattern must be kept); (5) components must not call Wails services directly where a state/reducer layer already owns that flow.",
+      "merge_system_rule": true
+    },
+    {
+      "path": "frontend/bindings/**",
+      "rule": "GENERATED CODE — wails3 generate output. Manual edits here are regressions: flag any change in bindings/ that is not backed by a go doc-comment/method-signature change in the backend, and require the proper `wails3 generate` step instead.",
+      "merge_system_rule": true
+    },
+    {
+      "path": "go.mod",
+      "rule": "CodeSaber dependencies: MUST stay CGO-free (modernc.org/sqlite pure-Go stack is load-bearing). Flag any new dependency that requires CGO, is Windows/macOS-specific without a guard, or duplicates an existing dependency (e.g. multiple git, fsnotify, or websocket libs).",
+      "merge_system_rule": true
+    },
+    {
+      "path": "build/**",
+      "rule": "CodeSaber build system (Wails v3 Taskfiles + platform-specific linux/darwin/windows packaging). Linux desktop builds require CGO with gtk4/webkit2gtk deps; guard regressions of those platform Taskfiles (CGO_ENABLED and pkg dependency install steps) and keep tag-driven version variables correctly quoted.",
+      "merge_system_rule": true
+    }
+  ],
+  "exclude": ["frontend/dist/**", "frontend/node_modules/**", "**/dist/assets/**"]
+}

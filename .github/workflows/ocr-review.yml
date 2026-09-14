@@ -35,5 +35,17 @@ jobs:
           llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
           llm_model: glm-5.3-flash
           llm_use_anthropic: "false"
+          background: >-
+            CodeSaber is a lightweight, modular-monolith Wails v3 desktop IDE:
+            Go backend (editor, git, terminal, LSP, ACP agents) + React 18 /
+            CodeMirror 6 frontend + generated Wails bindings. Protect the
+            architecture: each backend engine is an isolated goroutine with
+            panic recovery and restart scaffolding; Wails-bound methods return
+            fast (never block the UI); all persistence is atomic; dependencies
+            are pure-Go / CGO-free; frontend bindings are generated, never
+            hand-edited. Review thoroughly. Do not leave nit-level style
+            comments — only report real defects: races, leaks, blocking calls,
+            regressions in existing functionality, security issues, and broken
+            tests. Findings in English.
           github_token: ${{ secrets.GITHUB_TOKEN }}
           sticky_summary: "true"
