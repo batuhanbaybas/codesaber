@@ -8,11 +8,13 @@ import React, {
 } from 'react'
 import { Events } from '@wailsio/runtime'
 import * as App from '../../bindings/codesaber/backend/app'
+import type { Buffer } from '../../bindings/codesaber/backend/editor/models'
 
 export interface Tab {
   path: string
   title: string
   dirContent?: string
+  buffer?: Buffer
   dirty: boolean
   staleExternally?: boolean
   kind?: 'file' | 'diff' | 'md-preview' | 'image'
@@ -36,7 +38,7 @@ interface TabsContextValue {
   consumeReveal: (projectId: string, path: string) => void
   close: (projectId: string, path: string) => void
   setActive: (projectId: string, path: string) => void
-  setDirty: (projectId: string, path: string, dirty: boolean) => void
+  updateContent: (projectId: string, path: string, content: string) => void
   save: (projectId: string, path: string, content: string) => Promise<void>
   reload: (projectId: string, path: string, content: string) => void
   keepMine: (projectId: string, path: string) => void
@@ -82,6 +84,9 @@ export const parseMdPreviewTabPath = (key: string): string | null =>
 
 // Window during which an fs.change echo for a path we just saved is ignored.
 const saveEchoWindowMs = 2000
+const bufferSyncMs = 300
+
+const bufferKey = (projectId: string, path: string) => `${projectId}\0${path}`
 
 export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
@@ -91,9 +96,66 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
   >({})
   const [saveError, setSaveError] = useState<string | null>(null)
   const tabsRef = useRef(tabsByProject)
-  tabsRef.current = tabsByProject
   const lastSaveRef = useRef<Record<string, number>>({})
   const errorTimerRef = useRef<number | undefined>(undefined)
+  const bufferTimersRef = useRef(new Map<string, number>())
+  const bufferTasksRef = useRef(new Map<string, Promise<unknown>>())
+  const bufferIdsRef = useRef(new Map<string, string>())
+  const openRequestsRef = useRef(new Map<string, symbol>())
+
+  // Update the ref before scheduling React work: view cleanup and a fast
+  // project switch must see the last keystroke, even before the next render.
+  const updateTabs = useCallback(
+    (fn: (prev: Record<string, ProjectTabs>) => Record<string, ProjectTabs>) => {
+      const next = fn(tabsRef.current)
+      tabsRef.current = next
+      setTabsByProject(next)
+    },
+    [],
+  )
+
+  // Serialize a tab's backend operations, including close while the initial
+  // read is still pending. Other files/projects have independent queues.
+  const bufferTask = useCallback(<T,>(key: string, fn: () => Promise<T>): Promise<T> => {
+    const prev = bufferTasksRef.current.get(key) ?? Promise.resolve()
+    const task = prev.catch(() => {}).then(fn)
+    bufferTasksRef.current.set(key, task)
+    const cleanup = () => {
+      if (bufferTasksRef.current.get(key) === task) bufferTasksRef.current.delete(key)
+    }
+    task.then(cleanup, cleanup)
+    return task
+  }, [])
+
+  const syncBuffer = useCallback((projectId: string, path: string) => {
+    const key = bufferKey(projectId, path)
+    if (bufferTimersRef.current.has(key)) return
+    bufferTimersRef.current.set(key, window.setTimeout(() => {
+      bufferTimersRef.current.delete(key)
+      const buffer = tabsRef.current[projectId]?.open.find((t) => t.path === path)?.buffer
+      if (!buffer) return
+      void bufferTask(key, () => App.BufferUpdate(projectId, path, buffer))
+        .catch((e) => {
+          const current = tabsRef.current[projectId]?.open.find((t) => t.path === path)
+          if (current?.buffer?.id === buffer.id) {
+            setSaveError(`Buffer sync failed: ${String(e)}`)
+          }
+        })
+    }, bufferSyncMs))
+  }, [bufferTask])
+
+  const releaseBuffer = useCallback((projectId: string, path: string) => {
+    const key = bufferKey(projectId, path)
+    window.clearTimeout(bufferTimersRef.current.get(key))
+    bufferTimersRef.current.delete(key)
+    openRequestsRef.current.delete(key)
+    void bufferTask(key, async () => {
+      const id = bufferIdsRef.current.get(key)
+      if (!id) return
+      await App.BufferClose(projectId, path, id)
+      bufferIdsRef.current.delete(key)
+    }).catch((e) => setSaveError(`Buffer close failed: ${String(e)}`))
+  }, [bufferTask])
 
   const mutateTab = useCallback(
     (
@@ -101,7 +163,7 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
       path: string,
       patch: (t: Tab) => Partial<Tab>,
     ) => {
-      setTabsByProject((prev) => {
+      updateTabs((prev) => {
         const st = prev[projectId]
         if (!st) return prev
         if (!st.open.some((t) => t.path === path)) return prev
@@ -116,7 +178,7 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
         }
       })
     },
-    [],
+    [updateTabs],
   )
 
   const openFile = useCallback(
@@ -129,7 +191,7 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
         (t) => t.path === path,
       )
       const needFetch = !existing || existing.dirContent == null
-      setTabsByProject((prev) => {
+      updateTabs((prev) => {
         const st = prev[projectId] ?? { open: [], active: null }
         if (st.open.some((t) => t.path === path)) {
           return {
@@ -150,11 +212,24 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
         }
       })
       if (!needFetch) return
+      const key = bufferKey(projectId, path)
+      const request = Symbol()
+      openRequestsRef.current.set(key, request)
       try {
-        const content = isImagePath(path)
-          ? await App.ReadFileB64(path)
-          : await App.ReadFile(path)
-        setTabsByProject((prev) => {
+        let buffer: Buffer | undefined
+        let content: string
+        if (isImagePath(path)) {
+          content = await App.ReadFileB64(path)
+        } else {
+          buffer = await bufferTask(key, async () => {
+            const b = await App.BufferRead(projectId, path)
+            bufferIdsRef.current.set(key, b.id)
+            return b
+          })
+          content = buffer.savedContent
+        }
+        if (openRequestsRef.current.get(key) !== request) return
+        updateTabs((prev) => {
           const st = prev[projectId]
           if (!st) return prev
           return {
@@ -162,7 +237,14 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
             [projectId]: {
               ...st,
               open: st.open.map((t) =>
-                t.path === path ? { ...t, dirContent: content } : t,
+                t.path === path
+                  ? {
+                      ...t,
+                      buffer,
+                      dirContent: content,
+                      dirty: !!buffer && buffer.content !== buffer.savedContent,
+                    }
+                  : t,
               ),
             },
           }
@@ -171,11 +253,12 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
         // leave tab without content; Task 10 editor will surface errors
       }
     },
-    [],
+    [bufferTask, updateTabs],
   )
 
   const close = useCallback((projectId: string, path: string) => {
-    setTabsByProject((prev) => {
+    releaseBuffer(projectId, path)
+    updateTabs((prev) => {
       const st = prev[projectId]
       if (!st) return prev
       const idx = st.open.findIndex((t) => t.path === path)
@@ -187,7 +270,7 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
       }
       return { ...prev, [projectId]: { open, active } }
     })
-  }, [])
+  }, [releaseBuffer, updateTabs])
 
   const consumeReveal = useCallback(
     (projectId: string, path: string) => {
@@ -197,42 +280,42 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
   )
 
   const setActive = useCallback((projectId: string, path: string) => {
-    setTabsByProject((prev) => {
+    updateTabs((prev) => {
       const st = prev[projectId]
       if (!st || !st.open.some((t) => t.path === path)) return prev
       return { ...prev, [projectId]: { ...st, active: path } }
     })
-  }, [])
+  }, [updateTabs])
 
-  const setDirty = useCallback(
-    (projectId: string, path: string, dirty: boolean) => {
-      setTabsByProject((prev) => {
-        const st = prev[projectId]
-        if (!st) return prev
-        return {
-          ...prev,
-          [projectId]: {
-            ...st,
-            open: st.open.map((t) =>
-              t.path === path ? { ...t, dirty } : t,
-            ),
-          },
-        }
-      })
+  const updateContent = useCallback(
+    (projectId: string, path: string, content: string) => {
+      const buffer = tabsRef.current[projectId]?.open.find((t) => t.path === path)?.buffer
+      if (!buffer || buffer.content === content) return
+      mutateTab(projectId, path, () => ({
+        buffer: { ...buffer, content, version: buffer.version + 1 },
+        dirty: content !== buffer.savedContent,
+      }))
+      syncBuffer(projectId, path)
     },
-    [],
+    [mutateTab, syncBuffer],
   )
 
   const save = useCallback(
     async (projectId: string, path: string, content: string) => {
+      const id = tabsRef.current[projectId]?.open.find((t) => t.path === path)?.buffer?.id
       try {
         await App.SaveFile(path, content)
         lastSaveRef.current[`${projectId}\0${path}`] = Date.now()
-        mutateTab(projectId, path, () => ({
-          dirty: false,
-          staleExternally: false,
-          dirContent: content,
-        }))
+        mutateTab(projectId, path, (t) => {
+          if (!t.buffer || t.buffer.id !== id) return {}
+          return {
+            buffer: { ...t.buffer, savedContent: content, version: t.buffer.version + 1 },
+            dirty: t.buffer.content !== content,
+            staleExternally: false,
+            dirContent: content,
+          }
+        })
+        syncBuffer(projectId, path)
         setSaveError(null)
       } catch (e) {
         setSaveError(`Save failed: ${String(e)}`)
@@ -243,18 +326,22 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
         )
       }
     },
-    [mutateTab],
+    [mutateTab, syncBuffer],
   )
 
   const reload = useCallback(
     (projectId: string, path: string, content: string) => {
-      mutateTab(projectId, path, () => ({
+      mutateTab(projectId, path, (t) => ({
+        buffer: t.buffer
+          ? { ...t.buffer, content, savedContent: content, version: t.buffer.version + 1 }
+          : undefined,
         dirContent: content,
         dirty: false,
         staleExternally: false,
       }))
+      syncBuffer(projectId, path)
     },
-    [mutateTab],
+    [mutateTab, syncBuffer],
   )
 
   const keepMine = useCallback(
@@ -270,7 +357,7 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
   const openDiffTab = useCallback(
     (projectId: string, path: string, staged: boolean) => {
       const key = diffTabPath(path, staged)
-      setTabsByProject((prev) => {
+      updateTabs((prev) => {
         const st = prev[projectId] ?? { open: [], active: null }
         if (st.open.some((t) => t.path === key)) {
           return { ...prev, [projectId]: { ...st, active: key } }
@@ -288,7 +375,7 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
         }
       })
     },
-    [],
+    [updateTabs],
   )
 
   // Markdown preview tabs mirror diff tabs: never dirty, open is idempotent
@@ -300,7 +387,7 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
         (t) => t.path === key,
       )
       const needFetch = !existing || existing.dirContent == null
-      setTabsByProject((prev) => {
+      updateTabs((prev) => {
         const st = prev[projectId] ?? { open: [], active: null }
         if (st.open.some((t) => t.path === key)) {
           return { ...prev, [projectId]: { ...st, active: key } }
@@ -319,7 +406,7 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
       if (!needFetch) return
       App.ReadFile(path)
         .then((content) => {
-          setTabsByProject((prev) => {
+          updateTabs((prev) => {
             const st = prev[projectId]
             if (!st) return prev
             return {
@@ -335,14 +422,14 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
         })
         .catch(() => {})
     },
-    [],
+    [updateTabs],
   )
 
   // Closing a preview tab returns focus to the source tab when the preview
   // was active, mirroring how the eye toggle reads as "leave preview".
   const closeMdPreviewTab = useCallback((projectId: string, path: string) => {
     const key = mdPreviewTabPath(path)
-    setTabsByProject((prev) => {
+    updateTabs((prev) => {
       const st = prev[projectId]
       if (!st || !st.open.some((t) => t.path === key)) return prev
       const idx = st.open.findIndex((t) => t.path === key)
@@ -355,7 +442,33 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
       }
       return { ...prev, [projectId]: { open, active } }
     })
-  }, [])
+  }, [updateTabs])
+
+  useEffect(() => {
+    const off = Events.On('project.removed', (ev: any) => {
+      const { id } = (ev.data ?? {}) as { id?: string }
+      if (!id) return
+      for (const tab of tabsRef.current[id]?.open ?? []) releaseBuffer(id, tab.path)
+      updateTabs((prev) => {
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
+    })
+    return () => {
+      off()
+      // Flush pending snapshots when the workspace view is torn down. A
+      // project switch leaves this provider mounted and needs no RPC wait.
+      for (const [key, timer] of bufferTimersRef.current) {
+        window.clearTimeout(timer)
+        const [projectId, path] = key.split('\0')
+        const buffer = tabsRef.current[projectId]?.open.find((t) => t.path === path)?.buffer
+        if (buffer) void bufferTask(key, () => App.BufferUpdate(projectId, path, buffer)).catch(() => {})
+      }
+      bufferTimersRef.current.clear()
+      window.clearTimeout(errorTimerRef.current)
+    }
+  }, [bufferTask, releaseBuffer, updateTabs])
 
   // fs.change reconcile: auto-reload non-dirty tabs, flag dirty tabs; the
   // editor surface renders the banner. remove/rename silently closes
@@ -376,6 +489,7 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
       const previewTab = tabsRef.current[projectId]?.open.find(
         (t) => t.path === previewKey,
       )
+      if (!tab && !previewTab) return
       if (op === 'remove' || op === 'rename') {
         if (previewTab) close(projectId, previewKey)
         if (!tab) return
@@ -392,7 +506,15 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
         ? App.ReadFileB64(path)
         : App.ReadFile(path)
       read.then((content) => {
-        if (tab) reload(projectId, path, content)
+        const current = tabsRef.current[projectId]?.open.find((t) => t.path === path)
+        if (tab && current) {
+          if (current.buffer?.id !== tab.buffer?.id) return
+          if (current.dirty || current.buffer?.version !== tab.buffer?.version) {
+            mutateTab(projectId, path, () => ({ staleExternally: true }))
+            return
+          }
+          reload(projectId, path, content)
+        }
         if (previewTab) reload(projectId, previewKey, content)
       }).catch(() => {})
     })
@@ -408,7 +530,7 @@ export const TabsProvider: React.FC<{ children: React.ReactNode }> = ({
         close,
         consumeReveal,
         setActive,
-        setDirty,
+        updateContent,
         save,
         reload,
         keepMine,

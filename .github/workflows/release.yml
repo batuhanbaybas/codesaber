@@ -61,6 +61,12 @@ jobs:
           sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
 
       - name: Install wails3
+        # Build the wails3 CLI as a HOST-native tool: with GOARCH set at
+        # job level, go install would cross-compile the CLI and drop it in
+        # $GOPATH/bin/<goos>_<goarch>/ instead of $GOPATH/bin/.
+        env:
+          GOOS: ""
+          GOARCH: ""
         run: |
           go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"

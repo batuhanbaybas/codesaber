@@ -573,14 +573,12 @@ const TabEditor: React.FC<{
   tab: Tab
   active: boolean
 }> = ({ projectId, tab, active }) => {
-  const { setDirty, save, reload, keepMine, openFile, consumeReveal } =
+  const { updateContent, save, reload, keepMine, openFile, consumeReveal } =
     useTabs()
   const { generateCommit } = useAgent()
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)
   const wrapRef = useRef<HTMLDivElement | null>(null)
-  const loadedContentRef = useRef<string | undefined>(undefined)
-  const dirtyRef = useRef(false)
   const openedRef = useRef(false)
   const onSaveRef = useRef(save)
   const onOpenFileRef = useRef(openFile)
@@ -688,12 +686,10 @@ const TabEditor: React.FC<{
 
   useEffect(() => {
     if (!hostRef.current) return
-    loadedContentRef.current = tab.dirContent
-    dirtyRef.current = false
     openedRef.current = false
     const view = new EditorView({
       state: EditorState.create({
-        doc: tab.dirContent ?? '',
+        doc: tab.buffer?.content ?? '',
         extensions: [
           // diagnostics gutter goes before basicSetup so it renders to the
           // left of the line numbers
@@ -738,12 +734,7 @@ const TabEditor: React.FC<{
             if (isGo) {
               LSP.didChange(projectId, tab.path, u.state.doc.toString())
             }
-            const dirty =
-              u.state.doc.toString() !== (loadedContentRef.current ?? '')
-            if (dirty !== dirtyRef.current) {
-              dirtyRef.current = dirty
-              setDirty(projectId, tab.path, dirty)
-            }
+            updateContent(projectId, tab.path, u.state.doc.toString())
           }),
         ],
       }),
@@ -758,9 +749,9 @@ const TabEditor: React.FC<{
       view.destroy()
       viewRef.current = null
     }
-    // Recreate per open tab; content sync handled below via loadedContentRef.
+    // Views may unmount on project switches; the provider owns the live text.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab.path, projectId, setDirty])
+  }, [tab.path, projectId, updateContent])
 
   // toggle bracket colorization live via reconfigurable compartment
   useEffect(() => {
@@ -789,12 +780,12 @@ const TabEditor: React.FC<{
 
   // didOpen once per tab once content exists (gopls must see full text).
   useEffect(() => {
-    if (!isGo || openedRef.current || tab.dirContent === undefined) return
+    if (!isGo || openedRef.current || !tab.buffer) return
     LSP.ensure(projectId).catch(() => {})
     openedRef.current = true
-    LSP.didOpen(projectId, tab.path, tab.dirContent).catch(() => {})
+    LSP.didOpen(projectId, tab.path, tab.buffer.content).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isGo, tab.dirContent])
+  }, [isGo, tab.buffer])
 
   // lsp.diag events → per-tab per-line diagnostic markers.
   useEffect(() => {
@@ -813,24 +804,17 @@ const TabEditor: React.FC<{
   useEffect(() => {
     const view = viewRef.current
     if (!view) return
-    if (
-      tab.dirContent !== undefined &&
-      tab.dirContent !== loadedContentRef.current
-    ) {
-      loadedContentRef.current = tab.dirContent
+    const content = tab.buffer?.content
+    if (content !== undefined && content !== view.state.doc.toString()) {
       view.dispatch({
         changes: {
           from: 0,
           to: view.state.doc.length,
-          insert: tab.dirContent,
+          insert: content,
         },
       })
-      if (dirtyRef.current) {
-        dirtyRef.current = false
-        setDirty(projectId, tab.path, false)
-      }
     }
-  }, [tab.dirContent, tab.path, projectId, setDirty])
+  }, [tab.buffer?.content])
 
   useEffect(() => {
     const view = viewRef.current
@@ -975,13 +959,17 @@ const Editor: React.FC = () => {
             />
           ) : t.kind === 'image' ? (
             <ImageTab key={t.path} tab={t} active={t.path === state.active} />
-          ) : (
+          ) : t.buffer ? (
             <TabEditor
-              key={t.path}
+              key={`${activeId}:${t.path}`}
               projectId={activeId}
               tab={t}
               active={t.path === state.active}
             />
+          ) : (
+            <div key={t.path} className="text-dim text-xs p-3" style={{ display: t.path === state.active ? undefined : 'none' }}>
+              Loading file…
+            </div>
           ),
         )}
       </div>

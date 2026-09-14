@@ -19,6 +19,9 @@ import * as acp$0 from "./acp/models.js";
 import * as agentstore$0 from "./agentstore/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as editor$0 from "./editor/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as git$0 from "./git/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -139,6 +142,30 @@ export function ACPStart(projectID: string, harnessName: string): $CancellablePr
  */
 export function ACPStop(projectID: string): $CancellablePromise<void> {
     return $Call.ByID(3127032957, projectID);
+}
+
+/**
+ * BufferClose releases a closed tab's snapshot; switching projects does not
+ * close buffers. The ID prevents a late close from removing a reopened tab.
+ */
+export function BufferClose(projectID: string, path: string, id: string): $CancellablePromise<void> {
+    return $Call.ByID(1656880807, projectID, path, id);
+}
+
+/**
+ * BufferRead returns the project's open text buffer, reading disk only on
+ * first open. Like ReadFile, paths may refer to definitions outside the root.
+ */
+export function BufferRead(projectID: string, path: string): $CancellablePromise<editor$0.Buffer> {
+    return $Call.ByID(753238473, projectID, path);
+}
+
+/**
+ * BufferUpdate retains a text tab's latest snapshot in memory. The frontend
+ * advances Version for edits, saves and explicit reloads.
+ */
+export function BufferUpdate(projectID: string, path: string, buffer: editor$0.Buffer): $CancellablePromise<void> {
+    return $Call.ByID(1677947720, projectID, path, buffer);
 }
 
 /**
