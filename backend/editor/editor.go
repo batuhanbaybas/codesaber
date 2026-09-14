@@ -6,14 +6,17 @@ import (
 	"sync"
 )
 
-// Service tracks last-saved buffer content per path. The webview holds the live
-// content; backend truth reconciles on save and against external changes.
+// Service tracks last-saved content and per-project editor buffers. Buffers
+// survive editor view unmounts without writing unsaved text to disk.
 type Service struct {
-	mu    sync.Mutex
-	saved map[string]string
+	mu      sync.Mutex
+	saved   map[string]string
+	buffers map[string]map[string]Buffer
 }
 
-func New() *Service { return &Service{saved: map[string]string{}} }
+func New() *Service {
+	return &Service{saved: map[string]string{}, buffers: map[string]map[string]Buffer{}}
+}
 
 func (s *Service) Track(path, savedContent string) {
 	s.mu.Lock()
@@ -25,7 +28,16 @@ func (s *Service) Track(path, savedContent string) {
 func (s *Service) Count() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return len(s.saved)
+	paths := make(map[string]bool, len(s.saved))
+	for path := range s.saved {
+		paths[path] = true
+	}
+	for _, buffers := range s.buffers {
+		for path := range buffers {
+			paths[path] = true
+		}
+	}
+	return len(paths)
 }
 
 func (s *Service) Dirty(path, current string) bool {
