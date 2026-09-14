@@ -29,7 +29,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run OpenCodeReview
-        uses: alibaba/open-code-review@v1
+        uses: alibaba/open-code-review@v1.12.1
         with:
           llm_url: https://opencode.ai/zen/go/v1/chat/completions
           llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
