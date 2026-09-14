@@ -1,0 +1,39 @@
+name: ai-review
+
+# AI code review on every PR, including forks (pull_request_target exposes
+# repo secrets to fork PRs). Safe: OpenCodeReview only reads the diff and
+# never executes code from the PR.
+#
+# Secret to configure once: OCR_LLM_AUTH_TOKEN (OpenCode Go API key from
+# https://opencode.ai/auth). Everything else is hardcoded below.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    name: AI review (OCR + glm-5.3-flash)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run OpenCodeReview
+        uses: alibaba/open-code-review@v1
+        with:
+          llm_url: https://opencode.ai/zen/go/v1/chat/completions
+          llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+          llm_model: glm-5.3-flash
+          llm_use_anthropic: "false"
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          sticky_summary: "true"
