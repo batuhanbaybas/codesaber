@@ -42,7 +42,7 @@ import {
   getSettings,
   onSettingsChange,
 } from '../lib/settings'
-import { vimExtension } from '../lib/vim'
+import { vimExtension, setVimSaveHandler } from '../lib/vim'
 import { Events } from '@wailsio/runtime'
 import { useProjects } from '../state/projects'
 import { useTabs, type Tab } from '../state/tabs'
@@ -693,6 +693,17 @@ const TabEditor: React.FC<{
   useEffect(() => {
     if (!hostRef.current) return
     openedRef.current = false
+    // one save path for both the Mod-s keymap and the vim Ex dialog (:w/:wq/:x)
+    const doSave = (v: EditorView) => {
+      const text = v.state.doc.toString()
+      if (isGo) {
+        LSP.flushDidChange(projectId, tab.path)
+        onSaveRef.current?.(projectId, tab.path, text)
+        LSP.didSave(projectId, tab.path, text).catch(() => {})
+      } else {
+        onSaveRef.current?.(projectId, tab.path, text)
+      }
+    }
     const view = new EditorView({
       state: EditorState.create({
         doc: tab.buffer?.content ?? '',
@@ -717,15 +728,7 @@ const TabEditor: React.FC<{
               key: 'Mod-s',
               preventDefault: true,
               run: (v) => {
-                if (isGo) {
-                  LSP.flushDidChange(projectId, tab.path)
-                  onSaveRef.current?.(projectId, tab.path, v.state.doc.toString())
-                  LSP.didSave(projectId, tab.path, v.state.doc.toString()).catch(
-                    () => {},
-                  )
-                } else {
-                  onSaveRef.current?.(projectId, tab.path, v.state.doc.toString())
-                }
+                doSave(v)
                 return true
               },
             },
@@ -748,6 +751,7 @@ const TabEditor: React.FC<{
       parent: hostRef.current,
     })
     viewRef.current = view
+    setVimSaveHandler(view, () => doSave(view))
     return () => {
       if (openedRef.current) {
         LSP.flushDidChange(projectId, tab.path)

@@ -2,7 +2,7 @@
 // the --NORMAL--/--INSERT-- panel at the bottom (themed below).
 import { EditorView } from '@codemirror/view'
 import type { Extension } from '@codemirror/state'
-import { vim } from '@replit/codemirror-vim'
+import { CodeMirror, vim } from '@replit/codemirror-vim'
 
 const vimPanelTheme = EditorView.theme(
   {
@@ -30,5 +30,18 @@ const vimPanelTheme = EditorView.theme(
   },
   { dark: true },
 )
+
+// The Ex dialog's `:w`/`:wq`/`:x` runs the library's `write` command, which
+// looks up CodeMirror.commands.save (undefined by default, so it would no-op).
+// Editors register their save handler per view and it dispatches from there.
+const vimSaveHandlers = new WeakMap<EditorView, () => void>()
+
+export const setVimSaveHandler = (view: EditorView, save: () => void) => {
+  vimSaveHandlers.set(view, save)
+}
+
+CodeMirror.commands.save = (cm: { cm6: EditorView }) => {
+  vimSaveHandlers.get(cm.cm6)?.()
+}
 
 export const vimExtension = (): Extension => [vim({ status: true }), vimPanelTheme]
