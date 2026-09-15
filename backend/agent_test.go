@@ -232,10 +232,11 @@ func TestACPSendPromptStreamsAndPersists(t *testing.T) {
 	}
 
 	// transcript persisted: user entry + assembled agent reply
-	entries, err := app.ACPLoadTranscript(pid)
+	transcript, err := app.ACPLoadTranscript(pid)
 	if err != nil {
 		t.Fatalf("LoadTranscript: %v", err)
 	}
+	entries := transcript.Entries
 	var roles []string
 	for _, e := range entries {
 		roles = append(roles, e.Role)
@@ -371,10 +372,11 @@ func TestACPNewSessionClosesOldAndKeepsTranscript(t *testing.T) {
 		t.Fatalf("old session tail = %#v, want divider entry", oldEntries)
 	}
 	// the fresh record becomes the active transcript
-	entries, err := app.ACPLoadTranscript(pid)
+	transcript, err := app.ACPLoadTranscript(pid)
 	if err != nil {
 		t.Fatalf("LoadTranscript: %v", err)
 	}
+	entries := transcript.Entries
 	if len(entries) != 1 || entries[0].Text != "— session started —" {
 		t.Fatalf("transcript tail = %#v, want session-started entry", entries)
 	}
@@ -938,10 +940,11 @@ func TestACPOpenSessionSwitchesTranscript(t *testing.T) {
 	if err := app.ACPOpenSession(pid, firstID); err != nil {
 		t.Fatalf("ACPOpenSession: %v", err)
 	}
-	entries, err := app.ACPLoadTranscript(pid)
+	transcript, err := app.ACPLoadTranscript(pid)
 	if err != nil {
 		t.Fatalf("LoadTranscript: %v", err)
 	}
+	entries := transcript.Entries
 	found := false
 	for _, e := range entries {
 		if e.Text == "first session prompt" {
@@ -967,13 +970,13 @@ func TestACPClearTranscriptRefusesWhileRunning(t *testing.T) {
 	}
 	sessions, _ := app.ACPSessions(pid)
 	sid := sessions[0].ID
-	if err := app.ACPClearTranscript(pid); err == nil {
+	if err := app.ACPClearTranscript(pid, sid); err == nil {
 		t.Fatal("want error clearing the active session while the harness runs")
 	}
 	if err := app.ACPStop(pid); err != nil {
 		t.Fatalf("ACPStop: %v", err)
 	}
-	if err := app.ACPClearTranscript(pid); err != nil {
+	if err := app.ACPClearTranscript(pid, sid); err != nil {
 		t.Fatalf("clear after stop: %v", err)
 	}
 	entries, err := app.chats.Read(sid)
