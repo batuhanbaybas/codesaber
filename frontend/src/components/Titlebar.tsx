@@ -58,9 +58,16 @@ const Titlebar: React.FC = () => {
     void Window.ToggleMaximise()
   }
 
+  const onMouseDown = (e: React.MouseEvent) => {
+    // Prevent the native word-selection that fires on the second click of a
+    // double-click, before onDoubleClick ever runs.
+    if (e.detail > 1) e.preventDefault()
+  }
+
   return (
     <div
       className="drag-region py-4 pl-24 shrink-0 flex items-center bg-panel text-xs border-b border-panel"
+      onMouseDown={onMouseDown}
       onDoubleClick={onDoubleClick}
     >
       {/* Breadcrumb: project › branch chip › active file */}
