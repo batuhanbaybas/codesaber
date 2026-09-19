@@ -1,4 +1,5 @@
 import React from 'react'
+import { Window } from '@wailsio/runtime'
 import { useProjects } from '../state/projects'
 import { useTabs } from '../state/tabs'
 import { useGit } from '../state/git'
@@ -52,9 +53,22 @@ const Titlebar: React.FC = () => {
 
   const openQuickOpen = () => window.dispatchEvent(new Event('codesaber:quickopen'))
 
+  const onDoubleClick = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('.no-drag')) return
+    void Window.ToggleMaximise()
+  }
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    // Prevent the native word-selection that fires on the second click of a
+    // double-click, before onDoubleClick ever runs.
+    if (e.detail > 1) e.preventDefault()
+  }
+
   return (
     <div
       className="drag-region py-4 pl-24 shrink-0 flex items-center bg-panel text-xs border-b border-panel"
+      onMouseDown={onMouseDown}
+      onDoubleClick={onDoubleClick}
     >
       {/* Breadcrumb: project › branch chip › active file */}
       <div className="no-drag flex items-center min-w-0 shrink max-w-[min(45vw,420px)] overflow-hidden">

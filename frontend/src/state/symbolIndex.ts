@@ -1,5 +1,5 @@
 // Symbol extraction via web-tree-sitter (WASM) using the prebuilt
-// tree-sitter-wasms bundle (go/typescript/tsx/javascript grammars).
+// tree-sitter-wasms bundle (go/typescript/tsx/javascript/php/python/rust grammars).
 // web-tree-sitter is pinned to 0.25.x: tree-sitter-wasms 0.1.13 grammars are
 // ABI-incompatible with web-tree-sitter 0.26+/0.27 (dylink section layout).
 import { Parser, Language, type Tree, type Node } from 'web-tree-sitter'
@@ -18,11 +18,11 @@ export const supportedExt = (path: string): boolean => {
   const dot = base.lastIndexOf('.')
   if (dot <= 0) return false
   const ext = base.slice(dot + 1)
-  return ['go', 'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'php'].includes(ext)
+  return ['go', 'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'php', 'py', 'pyi', 'rs'].includes(ext)
 }
 
 // TS/TSX/JS grammars share the same node shapes; pick per extension.
-type LangName = 'go' | 'typescript' | 'tsx' | 'javascript' | 'php'
+type LangName = 'go' | 'typescript' | 'tsx' | 'javascript' | 'php' | 'python' | 'rust'
 const langForPath = (path: string): LangName => {
   const base = path.slice(path.lastIndexOf('/') + 1)
   const dot = base.lastIndexOf('.')
@@ -31,6 +31,8 @@ const langForPath = (path: string): LangName => {
   if (ext === 'ts' || ext === 'mts' || ext === 'cts') return 'typescript'
   if (ext === 'tsx') return 'tsx'
   if (ext === 'php') return 'php'
+  if (ext === 'py' || ext === 'pyi') return 'python'
+  if (ext === 'rs') return 'rust'
   return 'javascript'
 }
 
@@ -44,6 +46,8 @@ const defaultSources: Record<LangName, GrammarSource> = {
   tsx: async () => (await import('tree-sitter-wasms/out/tree-sitter-tsx.wasm?url')).default,
   javascript: async () => (await import('tree-sitter-wasms/out/tree-sitter-javascript.wasm?url')).default,
   php: async () => (await import('tree-sitter-wasms/out/tree-sitter-php.wasm?url')).default,
+  python: async () => (await import('tree-sitter-wasms/out/tree-sitter-python.wasm?url')).default,
+  rust: async () => (await import('tree-sitter-wasms/out/tree-sitter-rust.wasm?url')).default,
 }
 let sources: Record<LangName, GrammarSource> | null = null
 export const configureGrammars = (s: Partial<Record<LangName, GrammarSource>>): void => {
@@ -59,7 +63,7 @@ const initParser = (): Promise<boolean> => {
       try {
         await Parser.init()
         const src = sources ?? defaultSources
-        for (const name of ['go', 'typescript', 'tsx', 'javascript', 'php'] as LangName[]) {
+        for (const name of ['go', 'typescript', 'tsx', 'javascript', 'php', 'python', 'rust'] as LangName[]) {
           langs.set(name, await Language.load(await src[name]()))
         }
         return true
@@ -291,6 +295,115 @@ const extractPhp = (tree: Tree, text: string): Sym[] => {
   return out
 }
 
+// Python: classes and named functions, including decorated/async definitions.
+// Functions in class scope are methods; nested function bodies reset the scope.
+const extractPython = (tree: Tree, text: string): Sym[] => {
+  const out: Sym[] = []
+  const lineStarts: number[] = [0]
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '\n') lineStarts.push(i + 1)
+  }
+  const pos = (node: Node) => {
+    const idx = node.startIndex
+    let lo = 0
+    let hi = lineStarts.length - 1
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1
+      if (lineStarts[mid] <= idx) lo = mid
+      else hi = mid - 1
+    }
+    return { line: lo + 1, col: idx - lineStarts[lo] + 1 }
+  }
+  const add = (node: Node, kind: SymKind, name: string) => {
+    const { line, col } = pos(node)
+    out.push({ name, kind, line, col })
+  }
+  const visit = (n: Node, inClass: boolean) => {
+    switch (n.type) {
+      case 'class_definition': {
+        const nameNode = n.childForFieldName('name')
+        if (nameNode) add(nameNode, 'class', nameNode.text)
+        inClass = true
+        break
+      }
+      case 'function_definition': {
+        const nameNode = n.childForFieldName('name')
+        if (nameNode) add(nameNode, inClass ? 'method' : 'function', nameNode.text)
+        inClass = false
+        break
+      }
+    }
+    for (let i = 0; i < n.childCount; i++) {
+      const c = n.child(i)
+      if (c) visit(c, inClass)
+    }
+  }
+  visit(tree.rootNode, false)
+  return out
+}
+
+// Rust: structs/enums/unions/traits/aliases as type, const/static items as var.
+// Associated functions (including trait signatures) are methods; functions
+// nested inside their bodies remain free functions.
+const extractRust = (tree: Tree, text: string): Sym[] => {
+  const out: Sym[] = []
+  const lineStarts: number[] = [0]
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '\n') lineStarts.push(i + 1)
+  }
+  const pos = (node: Node) => {
+    const idx = node.startIndex
+    let lo = 0
+    let hi = lineStarts.length - 1
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1
+      if (lineStarts[mid] <= idx) lo = mid
+      else hi = mid - 1
+    }
+    return { line: lo + 1, col: idx - lineStarts[lo] + 1 }
+  }
+  const add = (node: Node, kind: SymKind, name: string) => {
+    const { line, col } = pos(node)
+    out.push({ name, kind, line, col })
+  }
+  const visit = (n: Node) => {
+    switch (n.type) {
+      case 'struct_item':
+      case 'enum_item':
+      case 'union_item':
+      case 'trait_item':
+      case 'type_item':
+      case 'associated_type': {
+        const nameNode = n.childForFieldName('name')
+        if (nameNode) add(nameNode, 'type', nameNode.text)
+        break
+      }
+      case 'function_item':
+      case 'function_signature_item': {
+        const nameNode = n.childForFieldName('name')
+        // Associated items live directly in the trait/impl declaration list.
+        // A function in a nested body or const initializer is not a method.
+        const owner = n.parent?.parent?.type
+        const inImpl = owner === 'impl_item' || owner === 'trait_item'
+        if (nameNode) add(nameNode, inImpl ? 'method' : 'function', nameNode.text)
+        break
+      }
+      case 'const_item':
+      case 'static_item': {
+        const nameNode = n.childForFieldName('name')
+        if (nameNode) add(nameNode, 'var', nameNode.text)
+        break
+      }
+    }
+    for (let i = 0; i < n.childCount; i++) {
+      const c = n.child(i)
+      if (c) visit(c)
+    }
+  }
+  visit(tree.rootNode)
+  return out
+}
+
 export const extractSymbolsSync = (path: string, text: string): Sym[] => {
   if (!parser) return []
   const lang = langs.get(langForPath(path))
@@ -306,6 +419,8 @@ export const extractSymbolsSync = (path: string, text: string): Sym[] => {
   let syms: Sym[]
   if (path.endsWith('.go')) syms = extractGo(tree, text)
   else if (path.endsWith('.php')) syms = extractPhp(tree, text)
+  else if (path.endsWith('.py') || path.endsWith('.pyi')) syms = extractPython(tree, text)
+  else if (path.endsWith('.rs')) syms = extractRust(tree, text)
   else syms = extractTs(tree, text)
   tree.delete()
   return syms
