@@ -1,4 +1,5 @@
 import React from 'react'
+import { Window } from '@wailsio/runtime'
 import { useProjects } from '../state/projects'
 import { useTabs } from '../state/tabs'
 import { useGit } from '../state/git'
@@ -52,10 +53,22 @@ const Titlebar: React.FC = () => {
 
   const openQuickOpen = () => window.dispatchEvent(new Event('codesaber:quickopen'))
 
+  const onDoubleClick = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('.no-drag')) return
+    void Window.ToggleMaximise()
+  }
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    // Prevent the native word-selection that fires on the second click of a
+    // double-click, before onDoubleClick ever runs.
+    if (e.detail > 1) e.preventDefault()
+  }
+
   return (
     <div
-      className="drag-region h-10 shrink-0 flex items-center bg-panel text-xs border-b border-panel"
-      style={{ paddingLeft: 72 }}
+      className="drag-region py-4 pl-24 shrink-0 flex items-center bg-panel text-xs border-b border-panel"
+      onMouseDown={onMouseDown}
+      onDoubleClick={onDoubleClick}
     >
       {/* Breadcrumb: project › branch chip › active file */}
       <div className="no-drag flex items-center min-w-0 shrink max-w-[min(45vw,420px)] overflow-hidden">
@@ -69,11 +82,11 @@ const Titlebar: React.FC = () => {
               <>
                 <span className="text-dim px-1.5 opacity-60">›</span>
                 <span
-                  className="flex items-center gap-1 px-1.5 h-[18px] rounded-full bg-[#1e1f22] text-[11px] text-dim shrink-0"
+                  className="flex items-center gap-1 px-1.5 h-4.5 rounded-full bg-[#1e1f22] text-[11px] text-dim shrink-0"
                   title={`branch ${branch}`}
                 >
                   <BranchIcon />
-                  <span className="max-w-[140px] truncate">{branch}</span>
+                  <span className="max-w-35 truncate">{branch}</span>
                 </span>
               </>
             )}
@@ -98,14 +111,14 @@ const Titlebar: React.FC = () => {
       {/* Search capsule — visually centered, hidden tail on narrow windows */}
       <div className="flex-1 flex justify-center px-3 min-w-0">
         <button
-          className="no-drag h-[24px] w-full max-w-[520px] flex items-center gap-2 px-2.5 rounded-full bg-[#1e1f22] border border-[var(--bg-border)] text-dim hover:border-[#4a4d54] hover:text-[#9a9da3] transition-colors"
+          className="no-drag h-6 w-full max-w-130 flex items-center gap-2 px-2.5 rounded-full bg-[#1e1f22] border border-(--bg-border) text-dim hover:border-[#4a4d54] hover:text-[#9a9da3] transition-colors"
           title="Search files, symbols & actions (⌘P)"
           aria-label="Open quick open"
           onClick={openQuickOpen}
         >
           <SearchIcon />
           <span className="truncate text-[11px]">Search files, symbols &amp; actions</span>
-          <span className="ml-auto shrink-0 px-1.5 h-[16px] rounded bg-white/8 text-[10px] leading-[16px] text-[#9a9da3]">
+          <span className="ml-auto shrink-0 px-1.5 h-4 rounded bg-white/8 text-[10px] leading-4 text-[#9a9da3]">
             ⌘P
           </span>
         </button>
